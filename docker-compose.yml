@@ -1,4 +1,7 @@
+# This file starts the app and its two dependencies (Postgres and Kafka)
+# together on your own computer, for local development.
 services:
+  # The database that stores users, transactions, and the ledger.
   postgres:
     image: postgres:16-alpine
     environment:
@@ -10,6 +13,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  # Kafka carries events between the app and the background outbox worker.
   kafka:
     image: apache/kafka:latest
     ports:
@@ -24,6 +28,7 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
+  # The FastAPI app itself, built from the Dockerfile in this folder.
   app:
     build: .
     ports:

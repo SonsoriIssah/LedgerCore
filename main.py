@@ -1,3 +1,6 @@
+# This is the main file of the app. It starts the API, connects to Kafka,
+# and defines all the routes (endpoints) that users can call.
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
 from database import engine, get_db, Base, AsyncSessionLocal, KAFKA_BOOTSTRAP_SERVERS
@@ -14,8 +17,11 @@ import hashlib
 
 logger = logging.getLogger(__name__)
 
+# Holds the Kafka producer once it connects. Stays None if Kafka is not available.
 producer = None
 
+# Runs in the background. Every 5 seconds, it looks for unsent events in the
+# outbox table and sends them to Kafka. If Kafka is not connected, it does nothing.
 async def outbox_poller():
     if producer is None:
         logger.warning("Outbox poller not started: Kafka producer unavailable")
@@ -33,6 +39,8 @@ async def outbox_poller():
 
         await asyncio.sleep(5)
 
+# Runs in the background. Reads events from Kafka and marks each one as processed,
+# so the same event is never handled twice. If Kafka is not connected, it does nothing.
 async def outbox_consumer():
     if producer is None:
         logger.warning("Outbox consumer not started: Kafka producer unavailable")
@@ -50,6 +58,8 @@ async def outbox_consumer():
 
             async with AsyncSessionLocal() as db:
                 try:
+                    # Try to record this event as processed. If it is already recorded,
+                    # this fails (because event_id must be unique) and we just skip it.
                     processed = ProcessedEventModel(event_id=event_id)
                     db.add(processed)
                     await db.commit()
@@ -60,12 +70,16 @@ async def outbox_consumer():
                 print(f"Processing event: {event_data}")
     finally:
         await consumer.stop()
+# This runs once when the app starts, and once when it shuts down.
+# It creates the database tables, connects to Kafka, and starts the background tasks.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global producer
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     try:
+        # Try to connect to Kafka. If it fails, keep the app running without it,
+        # so the API still works even if Kafka is down or not set up yet.
         candidate_producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
         await candidate_producer.start()
         producer = candidate_producer
@@ -75,6 +89,7 @@ async def lifespan(app: FastAPI):
     poller_task = asyncio.create_task(outbox_poller())
     consumer_task = asyncio.create_task(outbox_consumer())
     yield
+    # Code after "yield" runs when the app is shutting down.
     poller_task.cancel()
     consumer_task.cancel()
     if producer is not None:
@@ -83,19 +98,23 @@ app = FastAPI(lifespan=lifespan)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl='login')
 
 
+# What a client must send to register or log in.
 class User(BaseModel):
     email: str
     password: str
 
+# What a client must send to get a new access token.
 class RefreshRequest(BaseModel):
     refresh_token: str
 
+# What a client must send to move money between two accounts.
 class TransferRequest(BaseModel):
     from_account: int
     to_account: int
     amount: float
     idempotency_key: str
 
+# Create a new user account. The password is hashed before it is saved.
 @app.post('/register')
 async def register(user: User, db=Depends(get_db)):
     password = hash_password(user.password)
@@ -105,6 +124,7 @@ async def register(user: User, db=Depends(get_db)):
     await db.refresh(db_user)
     return db_user
 
+# Check a user's email and password, and give back an access token if they are correct.
 @app.post('/login')
 async def login(user: User, db=Depends(get_db)):
     result = await db.execute(select(UserModel).where(UserModel.email == user.email))
@@ -116,6 +136,8 @@ async def login(user: User, db=Depends(get_db)):
         raise HTTPException(status_code=401, detail='Invalid email or password')
     return create_access_token({'sub': user.email})
 
+# Read the access token from the request and return the matching user.
+# Other routes use this to know who is calling them.
 async def get_current_user(token: str = Depends(oauth2_scheme), db=Depends(get_db)):
     try:
         payload = decode_access_token(token)
@@ -131,6 +153,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db=Depends(get_d
         raise HTTPException(status_code=401, detail='Could not validate credentials')
     return user
 
+# Use a refresh token to get a brand new access token, without logging in again.
 @app.post('/refresh')
 async def refresh(token: RefreshRequest, db=Depends(get_db)):
     try:
@@ -148,6 +171,8 @@ async def refresh(token: RefreshRequest, db=Depends(get_db)):
     return create_access_token({'sub': user.email})
 
 
+# Build a check that only lets a user through if they have the right role.
+# Example: require_role("admin") blocks anyone who is not an admin.
 def require_role(required_role: str):
     async def role_checker(current_user=Depends(get_current_user)):
         if current_user.role != required_role:
@@ -155,18 +180,30 @@ def require_role(required_role: str):
         return current_user
     return role_checker
 
+# The starting hash for the audit trail. The very first entry links back to this.
 GENESIS_HASH = "0" * 64
 
+# Turn one transaction's details into a single hash (a short fingerprint).
+# Each entry includes the previous entry's hash, so the entries form a chain.
+# If any old entry is changed, the chain breaks and it is easy to detect.
 def compute_entry_hash(transaction_id: int, amount: float, status: str, previous_hash: str) -> str:
     data = f"{transaction_id}{amount}{status}{previous_hash}"
     return hashlib.sha256(data.encode('utf-8')).hexdigest()
 
+# Move money from one account to another.
+# This is the main route of the app. It:
+#   1. Checks if this transfer was already done before (using idempotency_key), to avoid duplicates.
+#   2. Creates the transaction and its two postings (one debit, one credit).
+#   3. Adds an event to the outbox, so Kafka can be told about it later.
+#   4. Adds a new entry to the audit trail.
+#   5. Retries up to 3 times if the database is busy.
 @app.post('/transfers')
 async def transfer(transaction: TransferRequest, db=Depends(get_db)):
     for attempt in range(3):
         try:
             await db.connection(execution_options={"isolation_level": "SERIALIZABLE"})
 
+            # If this exact transfer was already made, return the old result instead of doing it again.
             result = await db.execute(select(TransactionModel).where(TransactionModel.idempotency_key == transaction.idempotency_key))
             existing = result.scalars().first()
             if existing:
@@ -182,6 +219,8 @@ async def transfer(transaction: TransferRequest, db=Depends(get_db)):
             await db.commit()
             await db.refresh(db_transaction)
 
+            # Every transfer makes two postings: money leaves one account (debit)
+            # and enters another account (credit). Together they must balance.
             db_posting_debit = PostingModel(
                 transaction_id=db_transaction.id,
                 account_id=transaction.from_account,
@@ -195,6 +234,7 @@ async def transfer(transaction: TransferRequest, db=Depends(get_db)):
                 amount=transaction.amount
             )
 
+            # Save this event so it can be sent to Kafka later, even if Kafka is down right now.
             outbox_event = OutboxModel(
                 event_type="transfer.completed",
                 transaction_id=db_transaction.id,
@@ -210,6 +250,7 @@ async def transfer(transaction: TransferRequest, db=Depends(get_db)):
 
             db_transaction.status = 'completed'
 
+            # Add this transfer to the audit trail, linked to the previous entry's hash.
             last_entry_result = await db.execute(select(AuditLogModel).order_by(AuditLogModel.id.desc()))
             last_entry = last_entry_result.scalars().first()
             previous_hash = last_entry.entry_hash if last_entry else GENESIS_HASH
@@ -225,11 +266,14 @@ async def transfer(transaction: TransferRequest, db=Depends(get_db)):
             await db.refresh(db_transaction)
             return db_transaction
         except (OperationalError,DBAPIError):
+            # The database was busy or had a conflict. Try again from the top.
             await db.rollback()
             continue
     raise HTTPException(status_code=409, detail="Transfer could not complete, please try again")
 
 
+# Work out an account's balance by adding up all its postings.
+# Debits reduce the balance, credits increase it.
 @app.get('/accounts/{id}/balance')
 async def get_balance(id: int, db=Depends(get_db)):
     result = await db.execute(select(PostingModel).where(PostingModel.account_id == id))
@@ -245,6 +289,8 @@ async def get_balance(id: int, db=Depends(get_db)):
     return {"account_id": id, "balance": balance}
 
 
+# Check that the whole ledger is balanced: total debits should equal total credits.
+# This is a basic health check for the double-entry system.
 @app.get('/system/invariant-check')
 async def invariant_check(db=Depends(get_db)):
     result = await db.execute(select(PostingModel))
@@ -264,6 +310,9 @@ async def invariant_check(db=Depends(get_db)):
         "balanced": total_debits == total_credits
     }
 
+# Walk through the audit trail from the start and check that no entry was changed.
+# Each entry's hash is recomputed and compared to the stored value. If they do not
+# match, or if the chain of previous hashes is broken, the data was likely altered.
 @app.get('/system/audit-verify')
 async def audit_verify(db=Depends(get_db)):
     result = await db.execute(select(AuditLogModel).order_by(AuditLogModel.id.asc()))

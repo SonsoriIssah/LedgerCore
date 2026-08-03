@@ -1,7 +1,12 @@
+# This script stress-tests the app by firing many transfers at once.
+# Run it while the app is running on port 8001, then check the printed results.
+
 import asyncio
 import httpx
 import uuid
 
+# Send one transfer with a random idempotency_key. Return the status code,
+# or an error message if something went wrong.
 async def fire_transfer(client):
     key = str(uuid.uuid4())
     try:
@@ -15,6 +20,8 @@ async def fire_transfer(client):
     except Exception as e:
         return f"error: {e}"
 
+# Fire "n" transfers at the same time, print their results,
+# then check that the ledger is still balanced afterwards.
 async def run_chaos_test(n=50):
     async with httpx.AsyncClient() as client:
         results = await asyncio.gather(*[fire_transfer(client) for _ in range(n)])

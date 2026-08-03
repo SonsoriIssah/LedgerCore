@@ -1,20 +1,25 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
-from database import engine, get_db, Base, AsyncSessionLocal
+from database import engine, get_db, Base, AsyncSessionLocal, KAFKA_BOOTSTRAP_SERVERS
 from pydantic import BaseModel
 from sqlalchemy import select
 from models import UserModel, TransactionModel, PostingModel, OutboxModel, ProcessedEventModel, AuditLogModel
 from auth import hash_password, verify_password, create_access_token, decode_access_token, create_refresh_token
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
-import json, asyncio, http, uuid
+import json, asyncio, http, uuid, logging
 from sqlalchemy.exc import OperationalError, DBAPIError
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 import hashlib
 
+logger = logging.getLogger(__name__)
+
 producer = None
 
 async def outbox_poller():
+    if producer is None:
+        logger.warning("Outbox poller not started: Kafka producer unavailable")
+        return
     while True:
         async with AsyncSessionLocal() as db:
             result = await db.execute(select(OutboxModel).where(OutboxModel.published == False))
@@ -29,9 +34,12 @@ async def outbox_poller():
         await asyncio.sleep(5)
 
 async def outbox_consumer():
+    if producer is None:
+        logger.warning("Outbox consumer not started: Kafka producer unavailable")
+        return
     consumer = AIOKafkaConsumer(
         "ledger-events",
-        bootstrap_servers='localhost:9092',
+        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         group_id="ledger-consumer-group"
     )
     await consumer.start()
@@ -57,14 +65,20 @@ async def lifespan(app: FastAPI):
     global producer
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    producer = AIOKafkaProducer(bootstrap_servers='localhost:9092')
-    await producer.start()
+    try:
+        candidate_producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
+        await candidate_producer.start()
+        producer = candidate_producer
+    except Exception:
+        logger.warning("Kafka unavailable at %s; starting without event publishing", KAFKA_BOOTSTRAP_SERVERS, exc_info=True)
+        producer = None
     poller_task = asyncio.create_task(outbox_poller())
     consumer_task = asyncio.create_task(outbox_consumer())
     yield
     poller_task.cancel()
     consumer_task.cancel()
-    await producer.stop()
+    if producer is not None:
+        await producer.stop()
 app = FastAPI(lifespan=lifespan)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl='login')
 

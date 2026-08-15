@@ -6,7 +6,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from database import engine, get_db, Base, AsyncSessionLocal, KAFKA_BOOTSTRAP_SERVERS
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
 from models import UserModel, TransactionModel, PostingModel, OutboxModel, ProcessedEventModel, AuditLogModel
 from auth import hash_password, verify_password, create_access_token, decode_access_token, create_refresh_token
 from fastapi.security import OAuth2PasswordBearer
@@ -78,6 +78,14 @@ async def lifespan(app: FastAPI):
     global producer
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # create_all() only creates missing tables -- it never adds columns to
+        # ones that already exist. Patch in columns added after a table was
+        # already deployed, so a model change like this doesn't need a manual
+        # migration step against production. Safe to run every startup: it's
+        # a no-op once the column exists.
+        await conn.execute(text(
+            "ALTER TABLE postings ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()"
+        ))
     try:
         # Try to connect to Kafka. If it fails, keep the app running without it,
         # so the API still works even if Kafka is down or not set up yet.

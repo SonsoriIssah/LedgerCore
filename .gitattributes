@@ -1,0 +1,4 @@
+# Keep GitHub's language stats reflecting this as a Python project.
+# static/index.html is a single all-in-one frontend file (HTML/CSS/JS) that
+# would otherwise outweigh the actual Python backend in byte count.
+static/* linguist-vendored

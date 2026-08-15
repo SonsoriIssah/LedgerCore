@@ -1,0 +1,1045 @@
+<!-- Frontend for LedgerCore. Single file, no build step. -->
+<!-- Design system (colors, type scale, spacing tokens) matches the design system -->
+<!-- config exactly as given. Every number on screen comes from the real API. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>LedgerCore</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          "tertiary": "#000000",
+          "surface": "#f7f9fb",
+          "on-primary-fixed-variant": "#3f465c",
+          "on-secondary-container": "#fefcff",
+          "on-primary-container": "#7c839b",
+          "on-tertiary-fixed": "#0b1c30",
+          "secondary-fixed-dim": "#b4c5ff",
+          "on-primary-fixed": "#131b2e",
+          "tertiary-container": "#0b1c30",
+          "tertiary-fixed-dim": "#b7c8e1",
+          "inverse-surface": "#2d3133",
+          "surface-tint": "#565e74",
+          "primary": "#000000",
+          "secondary-fixed": "#dbe1ff",
+          "surface-variant": "#e0e3e5",
+          "tertiary-fixed": "#d3e4fe",
+          "on-error": "#ffffff",
+          "on-surface-variant": "#45464d",
+          "surface-dim": "#d8dadc",
+          "background": "#f7f9fb",
+          "primary-fixed-dim": "#bec6e0",
+          "surface-container-highest": "#e0e3e5",
+          "on-error-container": "#93000a",
+          "surface-bright": "#f7f9fb",
+          "surface-container-high": "#e6e8ea",
+          "on-surface": "#191c1e",
+          "primary-fixed": "#dae2fd",
+          "on-background": "#191c1e",
+          "secondary-container": "#316bf3",
+          "on-tertiary-container": "#75859d",
+          "outline-variant": "#c6c6cd",
+          "on-secondary-fixed": "#00174b",
+          "on-tertiary": "#ffffff",
+          "outline": "#76777d",
+          "primary-container": "#131b2e",
+          "inverse-on-surface": "#eff1f3",
+          "surface-container-low": "#f2f4f6",
+          "error": "#ba1a1a",
+          "surface-container": "#eceef0",
+          "on-tertiary-fixed-variant": "#38485d",
+          "error-container": "#ffdad6",
+          "on-secondary": "#ffffff",
+          "surface-container-lowest": "#ffffff",
+          "on-primary": "#ffffff",
+          "on-secondary-fixed-variant": "#003ea8",
+          "secondary": "#0051d5",
+          "inverse-primary": "#bec6e0"
+        },
+        borderRadius: { "DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem" },
+        spacing: {
+          "margin-mobile": "16px", "stack-sm": "8px", "margin-desktop": "40px", "container-max": "1440px",
+          "unit": "4px", "stack-md": "16px", "gutter": "24px", "stack-lg": "32px"
+        },
+        fontFamily: {
+          "body-sm": ["Inter"], "headline-md": ["Inter"], "body-md": ["Inter"], "headline-lg": ["Inter"],
+          "display-lg": ["Inter"], "label-mono": ["JetBrains Mono"], "label-caps": ["Inter"], "body-lg": ["Inter"]
+        },
+        fontSize: {
+          "body-sm": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+          "headline-md": ["24px", { "lineHeight": "32px", "fontWeight": "600" }],
+          "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+          "headline-lg": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+          "display-lg": ["48px", { "lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+          "label-mono": ["13px", { "lineHeight": "16px", "letterSpacing": "0.02em", "fontWeight": "500" }],
+          "label-caps": ["12px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "700" }],
+          "body-lg": ["18px", { "lineHeight": "28px", "fontWeight": "400" }]
+        }
+      }
+    }
+  };
+</script>
+<style>
+  body { font-family: 'Inter', sans-serif; background-color: #f7f9fb; }
+  .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; vertical-align: middle; }
+  .filled-icon { font-variation-settings: 'FILL' 1; }
+  /* !important is needed here: Tailwind's CDN stylesheet is injected after this
+     block, so utility classes like "flex" on the same element would otherwise
+     win the cascade over this rule despite matching specificity. */
+  .hidden-panel { display: none !important; }
+  /* Same cascade-order issue as .hidden-panel above: driving this off Tailwind's
+     own transform utilities was unreliable in this environment, so it's plain
+     CSS here instead. */
+  #sidebar { transform: translateX(-100%); transition: transform 0.2s ease; }
+  #sidebar.sidebar-open { transform: translateX(0); }
+  @media (min-width: 768px) { #sidebar { transform: translateX(0) !important; } }
+  #confirm-modal.hidden { display: none; }
+  .nav-link.active { border-left-color: #0051d5; background: rgba(255,255,255,0.08); color: #ffffff; }
+  .terminal-scroll::-webkit-scrollbar { width: 8px; }
+  .terminal-scroll::-webkit-scrollbar-track { background: #0f172a; }
+  .terminal-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+</style>
+</head>
+<body class="bg-surface text-on-surface antialiased font-body-md">
+
+<!-- AUTH VIEW: shown until the user logs in or registers -->
+<div id="view-auth" class="min-h-screen flex items-center justify-center p-6">
+  <div class="w-full max-w-[440px] bg-surface-container-lowest border border-outline-variant rounded-xl p-6 sm:p-10 shadow-sm">
+    <div class="text-center flex flex-col items-center gap-stack-sm mb-4">
+      <div class="w-12 h-12 bg-primary rounded-lg flex items-center justify-center mb-2">
+        <span class="material-symbols-outlined filled-icon text-on-primary text-2xl">account_balance</span>
+      </div>
+      <h1 class="font-headline-lg text-headline-lg text-primary">LedgerCore</h1>
+      <p class="font-body-sm text-body-sm text-on-surface-variant">A double-entry ledger, built from scratch.</p>
+    </div>
+
+    <div class="flex border-b border-outline-variant w-full mb-2">
+      <button id="tab-login" onclick="showAuthTab('login')" class="flex-1 pb-3 font-label-caps text-label-caps text-primary border-b-2 border-primary text-center">LOG IN</button>
+      <button id="tab-register" onclick="showAuthTab('register')" class="flex-1 pb-3 font-label-caps text-label-caps text-on-surface-variant hover:text-primary transition-colors text-center border-b-2 border-transparent">CREATE ACCOUNT</button>
+    </div>
+
+    <form id="form-login" onsubmit="event.preventDefault(); doLogin();" class="flex flex-col gap-stack-md">
+      <div class="flex flex-col gap-unit">
+        <label class="font-body-sm text-body-sm font-semibold text-primary" for="login-email">Email</label>
+        <input id="login-email" type="email" value="alice@example.com" required class="w-full rounded px-4 py-3 font-body-md text-body-md text-primary bg-surface-container-low border border-outline-variant focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all">
+      </div>
+      <div class="flex flex-col gap-unit">
+        <label class="font-body-sm text-body-sm font-semibold text-primary" for="login-password">Password</label>
+        <input id="login-password" type="password" value="password123" required class="w-full rounded px-4 py-3 font-body-md text-body-md text-primary bg-surface-container-low border border-outline-variant focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all">
+      </div>
+      <button type="submit" class="bg-primary text-on-primary w-full rounded py-3 font-body-md text-body-md font-semibold mt-2 flex justify-center items-center gap-2 hover:bg-on-primary-fixed-variant transition-colors">
+        Log in <span class="material-symbols-outlined text-lg">arrow_forward</span>
+      </button>
+      <div id="login-error" class="hidden-panel font-body-sm text-body-sm text-error bg-error-container rounded px-3 py-2"></div>
+    </form>
+
+    <form id="form-register" onsubmit="event.preventDefault(); doRegister();" class="hidden-panel flex-col gap-stack-md">
+      <div class="flex flex-col gap-unit">
+        <label class="font-body-sm text-body-sm font-semibold text-primary" for="reg-email">Email</label>
+        <input id="reg-email" type="email" placeholder="you@example.com" required class="w-full rounded px-4 py-3 font-body-md text-body-md text-primary bg-surface-container-low border border-outline-variant focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all">
+      </div>
+      <div class="flex flex-col gap-unit">
+        <label class="font-body-sm text-body-sm font-semibold text-primary" for="reg-password">Password</label>
+        <input id="reg-password" type="password" placeholder="••••••••" required class="w-full rounded px-4 py-3 font-body-md text-body-md text-primary bg-surface-container-low border border-outline-variant focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all">
+      </div>
+      <button type="submit" class="bg-primary text-on-primary w-full rounded py-3 font-body-md text-body-md font-semibold mt-2 flex justify-center items-center gap-2 hover:bg-on-primary-fixed-variant transition-colors">
+        Create account <span class="material-symbols-outlined text-lg">arrow_forward</span>
+      </button>
+      <div id="register-error" class="hidden-panel font-body-sm text-body-sm text-error bg-error-container rounded px-3 py-2"></div>
+    </form>
+  </div>
+</div>
+
+<!-- APP SHELL: shown after login -->
+<div id="view-app" class="hidden-panel min-h-screen flex">
+  <!-- Off-canvas on mobile (slides in/out), always visible from md breakpoint up. -->
+  <aside id="sidebar" class="h-screen w-64 fixed left-0 top-0 border-r border-outline-variant bg-primary flex flex-col py-stack-lg z-40">
+    <div class="px-gutter mb-stack-lg">
+      <h1 class="font-headline-md text-headline-md font-bold text-on-primary">LedgerCore</h1>
+      <p class="font-label-caps text-label-caps text-on-primary-container mt-unit">Local instance</p>
+    </div>
+    <nav class="flex-1 flex flex-col px-unit gap-unit">
+      <a href="#" data-panel="dashboard" onclick="showPanel('dashboard'); return false;" class="nav-link flex items-center gap-stack-sm px-gutter py-stack-sm font-body-sm text-body-sm text-on-primary-container border-l-4 border-transparent hover:bg-on-primary-fixed-variant/30 transition-colors">
+        <span class="material-symbols-outlined text-lg">dashboard</span> Dashboard
+      </a>
+      <a href="#" data-panel="accounts" onclick="showPanel('accounts'); return false;" class="nav-link flex items-center gap-stack-sm px-gutter py-stack-sm font-body-sm text-body-sm text-on-primary-container border-l-4 border-transparent hover:bg-on-primary-fixed-variant/30 transition-colors">
+        <span class="material-symbols-outlined text-lg">account_balance</span> Accounts
+      </a>
+      <a href="#" data-panel="transfer" onclick="showPanel('transfer'); return false;" class="nav-link flex items-center gap-stack-sm px-gutter py-stack-sm font-body-sm text-body-sm text-on-primary-container border-l-4 border-transparent hover:bg-on-primary-fixed-variant/30 transition-colors">
+        <span class="material-symbols-outlined text-lg">send</span> Transfers
+      </a>
+      <a href="#" data-panel="activity" onclick="showPanel('activity'); return false;" class="nav-link flex items-center gap-stack-sm px-gutter py-stack-sm font-body-sm text-body-sm text-on-primary-container border-l-4 border-transparent hover:bg-on-primary-fixed-variant/30 transition-colors">
+        <span class="material-symbols-outlined text-lg">receipt_long</span> Activity
+      </a>
+      <a href="#" data-panel="admin" onclick="showPanel('admin'); return false;" class="nav-link flex items-center gap-stack-sm px-gutter py-stack-sm font-body-sm text-body-sm text-on-primary-container border-l-4 border-transparent hover:bg-on-primary-fixed-variant/30 transition-colors">
+        <span class="material-symbols-outlined text-lg">terminal</span> Admin Console
+      </a>
+    </nav>
+    <div class="px-gutter pt-stack-md mt-auto border-t border-on-primary-fixed-variant flex items-center gap-stack-sm">
+      <div id="avatar" class="w-9 h-9 rounded-full bg-secondary flex items-center justify-center text-on-secondary font-body-sm text-body-sm font-semibold flex-shrink-0"></div>
+      <div class="flex-1 min-w-0">
+        <p id="whoami-email" class="font-body-sm text-body-sm font-medium text-on-primary truncate"></p>
+        <button onclick="logout()" class="font-label-caps text-[10px] text-on-primary-container hover:text-on-primary transition-colors">LOG OUT</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Dims the page and closes the sidebar on tap, mobile only. -->
+  <div id="sidebar-backdrop" onclick="closeSidebar()" class="hidden-panel fixed inset-0 bg-tertiary/40 z-30 md:hidden"></div>
+
+  <div class="flex-1 ml-0 md:ml-64 flex flex-col min-h-screen min-w-0">
+    <header class="flex justify-between items-center w-full px-4 md:px-margin-desktop h-16 sticky top-0 border-b border-outline-variant bg-surface z-10">
+      <div class="flex items-center gap-2">
+        <button onclick="toggleSidebar()" class="md:hidden text-on-surface-variant hover:text-secondary transition-colors flex items-center justify-center p-unit rounded hover:bg-surface-container-high">
+          <span class="material-symbols-outlined">menu</span>
+        </button>
+        <div class="font-headline-md text-headline-md font-extrabold text-primary"></div>
+      </div>
+      <div class="flex items-center gap-3 md:gap-gutter">
+        <!-- Real recent activity for the main account, not decoration. -->
+        <div id="notif-container" class="relative">
+          <button onclick="toggleNotifications()" class="relative text-on-surface-variant hover:text-secondary transition-colors flex items-center justify-center p-unit rounded hover:bg-surface-container-high">
+            <span class="material-symbols-outlined">notifications</span>
+            <span id="notif-badge" class="hidden-panel absolute top-0 right-0 bg-error text-on-error text-[10px] font-bold rounded-full w-4 h-4 items-center justify-center leading-none">0</span>
+          </button>
+          <div id="notif-dropdown" class="hidden-panel absolute right-0 top-12 w-72 sm:w-80 max-w-[calc(100vw-2rem)] bg-surface-container-lowest border border-outline-variant rounded-lg shadow-lg z-50 overflow-hidden">
+            <div class="p-stack-md border-b border-outline-variant font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">Recent Activity — Account #<span id="notif-account-id"></span></div>
+            <div id="notif-list" class="max-h-80 overflow-y-auto"></div>
+          </div>
+        </div>
+        <!-- Real setting: which account the Dashboard/Accounts pages show. -->
+        <div id="settings-container" class="relative">
+          <button onclick="toggleSettings()" class="text-on-surface-variant hover:text-secondary transition-colors flex items-center justify-center p-unit rounded hover:bg-surface-container-high">
+            <span class="material-symbols-outlined">settings</span>
+          </button>
+          <div id="settings-dropdown" class="hidden-panel absolute right-0 top-12 w-64 sm:w-72 max-w-[calc(100vw-2rem)] bg-surface-container-lowest border border-outline-variant rounded-lg shadow-lg z-50 p-stack-md">
+            <label class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider block mb-unit" for="settings-account-id">Main account ID</label>
+            <p class="font-body-sm text-body-sm text-on-surface-variant mb-stack-sm">Which account the Dashboard and Accounts pages show.</p>
+            <div class="flex gap-stack-sm">
+              <input id="settings-account-id" type="number" min="1" value="1" class="flex-1 min-w-0 rounded px-3 py-2 font-label-mono text-label-mono bg-surface-container-low border border-outline-variant text-on-surface focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all">
+              <button onclick="saveMainAccountId()" class="bg-primary text-on-primary px-gutter rounded font-body-sm text-body-sm font-semibold hover:bg-on-primary-fixed-variant transition-colors">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="flex-1 p-margin-mobile md:p-margin-desktop bg-background max-w-[1440px] mx-auto w-full">
+
+      <!-- DASHBOARD -->
+      <section id="panel-dashboard">
+        <div class="mb-stack-lg">
+          <h2 class="font-headline-lg text-headline-lg text-on-surface">Main Account</h2>
+          <p class="font-body-md text-body-md text-on-surface-variant mt-unit">Total Portfolio Balance</p>
+        </div>
+        <!-- This design has no account picker, so it always shows account #1.
+             Balance, meta line, and the activity table below are all real data. -->
+        <div class="grid grid-cols-1 gap-gutter mb-stack-lg lg:grid-cols-2">
+          <div class="bg-surface-container-lowest border border-outline-variant rounded-lg p-gutter flex flex-col justify-between h-48 hover:border-outline transition-colors group">
+            <div class="flex justify-between items-start">
+              <div>
+                <p class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">Operating Account</p>
+                <p id="main-account-id" class="font-label-mono text-label-mono text-on-surface-variant mt-unit">Account #1</p>
+              </div>
+              <span class="material-symbols-outlined text-outline group-hover:text-primary transition-colors">arrow_outward</span>
+            </div>
+            <div>
+              <p id="main-balance-value" class="font-display-lg text-display-lg text-primary">—</p>
+              <p id="main-balance-meta" class="font-label-mono text-label-mono text-on-surface-variant mt-unit">Loading…</p>
+            </div>
+          </div>
+          <div class="bg-surface-container-lowest border border-outline-variant rounded-lg p-gutter flex flex-col justify-center items-center h-48 bg-gradient-to-br from-surface to-surface-container-low">
+            <button onclick="showPanel('transfer')" class="bg-primary hover:bg-inverse-surface text-on-primary px-gutter py-stack-sm rounded transition-colors w-full flex items-center justify-center gap-stack-sm mb-stack-md">
+              <span class="material-symbols-outlined">send</span>
+              <span class="font-body-md text-body-md font-semibold">Initiate Transfer</span>
+            </button>
+            <button class="border border-outline-variant hover:border-outline bg-surface-container-lowest text-primary px-gutter py-stack-sm rounded transition-colors w-full flex items-center justify-center gap-stack-sm">
+              <span class="material-symbols-outlined">swap_horiz</span>
+              <span class="font-body-md text-body-md font-semibold">Internal Swap</span>
+            </button>
+          </div>
+        </div>
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-lg">
+          <div class="p-gutter border-b border-outline-variant flex justify-between items-center">
+            <h3 class="font-headline-md text-headline-md text-on-surface">Recent Activity</h3>
+            <button onclick="showPanel('activity')" class="font-label-caps text-label-caps text-secondary hover:text-primary transition-colors flex items-center gap-unit uppercase tracking-wider">
+              View All
+              <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+            </button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr>
+                  <th class="py-stack-sm px-gutter font-label-caps text-label-caps text-on-surface-variant border-b border-outline-variant uppercase tracking-wider w-32">Date</th>
+                  <th class="py-stack-sm px-gutter font-label-caps text-label-caps text-on-surface-variant border-b border-outline-variant uppercase tracking-wider">Description</th>
+                  <th class="py-stack-sm px-gutter font-label-caps text-label-caps text-on-surface-variant border-b border-outline-variant uppercase tracking-wider">Reference</th>
+                  <th class="py-stack-sm px-gutter font-label-caps text-label-caps text-on-surface-variant border-b border-outline-variant uppercase tracking-wider">Status</th>
+                  <th class="py-stack-sm px-gutter font-label-caps text-label-caps text-on-surface-variant border-b border-outline-variant uppercase tracking-wider text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody id="main-activity-rows" class="font-body-sm text-body-sm text-on-surface"></tbody>
+            </table>
+            <p id="main-activity-empty" class="hidden-panel font-body-sm text-body-sm text-on-surface-variant text-center py-8">No activity yet.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ACCOUNTS (account detail) -->
+      <section id="panel-accounts" class="hidden-panel">
+        <!-- This design has no account picker, so it always shows account #1, same as the Dashboard.
+             Balance and the transaction table below are real, with a running balance computed client-side. -->
+        <div class="mb-stack-lg">
+          <div class="flex flex-col md:flex-row justify-between items-start md:items-end gap-stack-md">
+            <div>
+              <p class="font-label-caps text-label-caps text-on-surface-variant mb-unit uppercase tracking-widest">Operating Account</p>
+              <h1 class="font-display-lg text-display-lg text-primary">Main Operating</h1>
+              <p id="acct-account-id" class="font-label-mono text-label-mono text-outline mt-unit">ACCT: —</p>
+            </div>
+            <div class="text-left md:text-right">
+              <p class="font-label-caps text-label-caps text-on-surface-variant mb-unit uppercase tracking-widest">Available Balance</p>
+              <h2 id="acct-balance-value" class="font-display-lg text-display-lg text-primary font-label-mono">—</h2>
+            </div>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-stack-sm mb-stack-lg">
+          <button onclick="showPanel('transfer')" class="bg-primary text-on-primary px-gutter py-stack-sm rounded-DEFAULT font-body-sm text-body-sm font-semibold hover:bg-on-primary-fixed-variant transition-colors flex items-center">
+            <span class="material-symbols-outlined mr-unit text-[18px]">swap_horiz</span>
+            Initiate Transfer
+          </button>
+          <a id="acct-export-link" href="#" class="bg-surface-container-lowest text-primary border border-surface-variant px-gutter py-stack-sm rounded-DEFAULT font-body-sm text-body-sm font-semibold hover:bg-surface-container-low transition-colors flex items-center">
+            <span class="material-symbols-outlined mr-unit text-[18px]">download</span>
+            Export Statement
+          </a>
+        </div>
+        <div class="bg-surface-container-lowest border border-surface-variant rounded-lg overflow-hidden">
+          <div class="p-stack-md border-b border-surface-variant flex justify-between items-center bg-surface-container-lowest">
+            <h3 class="font-headline-md text-headline-md text-primary">Transaction History</h3>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="border-b border-surface-variant bg-surface-bright">
+                  <th class="py-stack-md px-gutter font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest w-40">Date</th>
+                  <th class="py-stack-md px-gutter font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest">Description / Counterparty</th>
+                  <th class="py-stack-md px-gutter font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest text-right w-48">Amount</th>
+                  <th class="py-stack-md px-gutter font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest text-right w-48">Balance</th>
+                </tr>
+              </thead>
+              <tbody id="acct-transaction-rows" class="font-body-sm text-body-sm text-on-surface"></tbody>
+            </table>
+            <p id="acct-transaction-empty" class="hidden-panel font-body-sm text-body-sm text-on-surface-variant text-center py-8">No transactions for this account yet.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- TRANSFER -->
+      <section id="panel-transfer" class="hidden-panel">
+        <div class="mb-stack-lg">
+          <h2 class="font-headline-lg text-headline-lg text-on-surface">Send a transfer</h2>
+          <p class="font-body-md text-body-md text-on-surface-variant mt-unit">Moves money between two account IDs. Every transfer is idempotency-key protected.</p>
+        </div>
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-lg p-stack-lg max-w-lg">
+          <form id="transfer-form" onsubmit="event.preventDefault(); reviewTransfer();" class="flex flex-col gap-stack-md">
+            <div class="grid grid-cols-2 gap-stack-md">
+              <div class="flex flex-col gap-unit">
+                <label class="font-body-sm text-body-sm font-semibold text-primary" for="xfer-from">From account ID</label>
+                <input id="xfer-from" type="number" value="1" required class="w-full bg-surface-container-low border border-outline-variant rounded p-3 font-label-mono text-label-mono text-on-surface focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all">
+              </div>
+              <div class="flex flex-col gap-unit">
+                <label class="font-body-sm text-body-sm font-semibold text-primary" for="xfer-to">To account ID</label>
+                <input id="xfer-to" type="number" value="2" required class="w-full bg-surface-container-low border border-outline-variant rounded p-3 font-label-mono text-label-mono text-on-surface focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all">
+              </div>
+            </div>
+            <div class="flex flex-col gap-unit mt-stack-sm">
+              <label class="font-body-sm text-body-sm font-semibold text-primary" for="xfer-amount">Transfer amount</label>
+              <div class="relative flex items-center">
+                <span class="absolute left-4 font-headline-md text-headline-md text-on-surface-variant select-none">$</span>
+                <input id="xfer-amount" type="number" min="0.01" step="0.01" value="10" required class="w-full bg-surface-container-low border border-outline-variant rounded py-4 pl-10 pr-4 font-headline-md text-headline-md font-bold text-primary focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all">
+              </div>
+            </div>
+            <button type="submit" class="bg-primary text-on-primary w-full rounded py-3 font-body-sm text-body-sm font-semibold mt-stack-sm flex justify-center items-center gap-2 hover:bg-on-primary-fixed-variant transition-colors">
+              Review transfer <span class="material-symbols-outlined text-lg">arrow_forward</span>
+            </button>
+          </form>
+          <div id="xfer-result" class="hidden-panel mt-stack-md"></div>
+        </div>
+      </section>
+
+      <!-- ACTIVITY -->
+      <section id="panel-activity" class="hidden-panel">
+        <div class="mb-stack-lg">
+          <h2 class="font-headline-lg text-headline-lg text-on-surface">Activity</h2>
+          <p class="font-body-md text-body-md text-on-surface-variant mt-unit">Recent postings for one account, newest first.</p>
+        </div>
+        <div class="flex gap-stack-sm mb-stack-lg max-w-md">
+          <input id="activity-account-id" type="number" value="1" class="flex-1 min-w-0 rounded px-4 py-2.5 font-label-mono text-label-mono bg-surface-container-low border border-outline-variant text-on-surface focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all">
+          <button onclick="loadActivity()" class="bg-primary text-on-primary px-gutter rounded font-body-sm text-body-sm font-semibold hover:bg-on-primary-fixed-variant transition-colors">Load</button>
+        </div>
+        <div class="bg-surface-container-lowest border border-outline-variant rounded-lg overflow-hidden">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="bg-surface-bright">
+                <th class="py-stack-sm px-gutter font-label-caps text-label-caps text-on-surface-variant border-b border-outline-variant uppercase tracking-widest">Date</th>
+                <th class="py-stack-sm px-gutter font-label-caps text-label-caps text-on-surface-variant border-b border-outline-variant uppercase tracking-widest">Type</th>
+                <th class="py-stack-sm px-gutter font-label-caps text-label-caps text-on-surface-variant border-b border-outline-variant uppercase tracking-widest">Transaction</th>
+                <th class="py-stack-sm px-gutter font-label-caps text-label-caps text-on-surface-variant border-b border-outline-variant uppercase tracking-widest text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody id="activity-rows" class="font-body-sm text-body-sm text-on-surface"></tbody>
+          </table>
+          <p id="activity-empty" class="hidden-panel font-body-sm text-body-sm text-on-surface-variant text-center py-8">No postings for this account yet.</p>
+        </div>
+      </section>
+
+      <!-- SYSTEM / ADMIN -->
+      <section id="panel-admin" class="hidden-panel">
+        <div class="bg-[#0b0f19] text-slate-300 rounded-lg p-gutter -mx-2">
+          <div class="flex items-center justify-between mb-stack-lg px-2">
+            <div>
+              <h2 class="font-headline-lg text-white mb-1">System diagnostics</h2>
+              <p class="text-slate-400 font-body-sm text-body-sm">Ledger integrity checks and a live concurrency test, both against the real API.</p>
+            </div>
+            <span id="env-badge" class="font-label-mono text-label-mono text-green-400 flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-green-500 inline-block"></span>
+            </span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-gutter px-2 mb-stack-md">
+            <!-- Invariant check -->
+            <div class="bg-[#111827] border border-slate-800 rounded p-gutter flex flex-col">
+              <div class="flex justify-between items-start mb-stack-md">
+                <div>
+                  <h3 class="font-label-caps text-label-caps text-slate-400 mb-1">Invariant check</h3>
+                  <p class="text-xs text-slate-500">Total debits vs total credits</p>
+                </div>
+                <button onclick="runInvariantCheck()" class="text-slate-400 hover:text-white transition-colors">
+                  <span class="material-symbols-outlined">refresh</span>
+                </button>
+              </div>
+              <div id="invariant-body" class="flex-1 flex flex-col justify-center gap-3">
+                <p class="text-slate-500 font-body-sm text-body-sm">Not checked yet.</p>
+              </div>
+            </div>
+
+            <!-- Audit verify -->
+            <div class="bg-[#111827] border border-slate-800 rounded p-gutter flex flex-col">
+              <div class="flex justify-between items-start mb-stack-md">
+                <div>
+                  <h3 class="font-label-caps text-label-caps text-slate-400 mb-1">Audit trail</h3>
+                  <p class="text-xs text-slate-500">Hash-chain tamper check</p>
+                </div>
+                <button onclick="runAuditVerify()" class="text-slate-400 hover:text-white transition-colors">
+                  <span class="material-symbols-outlined">refresh</span>
+                </button>
+              </div>
+              <div id="audit-body" class="flex-1 flex flex-col justify-center gap-3">
+                <p class="text-slate-500 font-body-sm text-body-sm">Not checked yet.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Concurrency simulator: fires real concurrent transfers, no fake data -->
+          <div class="bg-[#111827] border border-slate-800 rounded p-gutter mx-2">
+            <div class="flex justify-between items-start mb-stack-md flex-wrap gap-4">
+              <div>
+                <h3 class="font-label-caps text-label-caps text-slate-400 mb-1">Concurrency test</h3>
+                <p class="text-xs text-slate-500">Fires real concurrent transfers at the API to exercise the retry-on-conflict logic.</p>
+              </div>
+              <div class="flex gap-2 items-end flex-wrap">
+                <div>
+                  <label class="text-[10px] uppercase tracking-wider text-slate-500 block mb-1">From</label>
+                  <input id="sim-from" type="number" value="1" class="w-20 rounded px-2 py-1.5 font-label-mono text-label-mono bg-[#1f2937] border-slate-700 text-slate-200">
+                </div>
+                <div>
+                  <label class="text-[10px] uppercase tracking-wider text-slate-500 block mb-1">To</label>
+                  <input id="sim-to" type="number" value="2" class="w-20 rounded px-2 py-1.5 font-label-mono text-label-mono bg-[#1f2937] border-slate-700 text-slate-200">
+                </div>
+                <div>
+                  <label class="text-[10px] uppercase tracking-wider text-slate-500 block mb-1">Amount</label>
+                  <input id="sim-amount" type="number" value="1" class="w-20 rounded px-2 py-1.5 font-label-mono text-label-mono bg-[#1f2937] border-slate-700 text-slate-200">
+                </div>
+                <div>
+                  <label class="text-[10px] uppercase tracking-wider text-slate-500 block mb-1">Requests</label>
+                  <input id="sim-count" type="number" value="20" min="1" max="200" class="w-20 rounded px-2 py-1.5 font-label-mono text-label-mono bg-[#1f2937] border-slate-700 text-slate-200">
+                </div>
+                <button id="sim-run-btn" onclick="runConcurrencySim()" class="bg-secondary hover:opacity-90 text-on-secondary font-semibold py-2 px-gutter rounded text-xs transition-opacity flex items-center gap-2">
+                  <span class="material-symbols-outlined text-sm">play_arrow</span> Run
+                </button>
+              </div>
+            </div>
+            <div id="sim-terminal" class="bg-[#0f172a] border border-slate-800 rounded p-4 h-64 overflow-y-auto terminal-scroll font-label-mono text-[11px] leading-relaxed">
+              <div class="text-slate-500">&gt; Ready. Set the fields above and click Run.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- Transfer confirmation modal -->
+<div id="confirm-modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-tertiary/40 backdrop-blur-sm p-margin-mobile">
+  <div class="w-full max-w-md bg-surface-container-lowest border border-outline-variant rounded shadow-xl p-stack-lg">
+    <div class="flex items-center gap-3 mb-stack-md">
+      <div class="w-10 h-10 rounded-full bg-secondary-fixed/30 flex items-center justify-center text-secondary">
+        <span class="material-symbols-outlined filled-icon">info</span>
+      </div>
+      <div>
+        <h2 class="font-headline-md text-[20px] font-semibold text-primary leading-tight">Review transfer</h2>
+        <p class="font-body-sm text-body-sm text-on-surface-variant">Confirm before this is sent to the API.</p>
+      </div>
+    </div>
+    <div class="bg-surface border border-outline-variant rounded p-stack-md mb-stack-md space-y-3">
+      <div class="flex justify-between"><span class="font-label-caps text-label-caps text-on-surface-variant uppercase">From account</span><span class="font-label-mono text-label-mono font-semibold text-primary" id="confirm-from"></span></div>
+      <div class="flex justify-between"><span class="font-label-caps text-label-caps text-on-surface-variant uppercase">To account</span><span class="font-label-mono text-label-mono font-semibold text-primary" id="confirm-to"></span></div>
+      <div class="flex justify-between border-t border-outline-variant pt-3"><span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Amount</span><span class="font-label-mono text-lg font-bold text-primary" id="confirm-amount"></span></div>
+    </div>
+    <div class="flex flex-col gap-stack-sm">
+      <button onclick="executeTransfer()" id="confirm-send-btn" class="bg-secondary text-on-secondary w-full rounded py-3 font-body-sm text-body-sm font-bold flex justify-center items-center gap-2 hover:opacity-90 transition-opacity">
+        <span class="material-symbols-outlined text-lg">send</span> Confirm &amp; send
+      </button>
+      <button onclick="hideModal()" class="border border-outline-variant w-full rounded py-3 font-body-sm text-body-sm font-semibold hover:bg-surface-container-low transition-colors">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Holds the access token and email after login. Kept in memory only.
+let accessToken = null;
+let userEmail = null;
+
+// ---- Session persistence (survive a page refresh) ----
+// The access token is short-lived (30 min) and never stored -- only the
+// longer-lived refresh token (7 days) and the email go in localStorage.
+// On load, a fresh access token is requested with it, so refreshing the page
+// no longer bounces the user back to the login screen.
+const REFRESH_TOKEN_KEY = 'ledgercore_refresh_token';
+const EMAIL_KEY = 'ledgercore_email';
+
+function saveSession(refreshToken, email) {
+  localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  localStorage.setItem(EMAIL_KEY, email);
+}
+
+function clearSession() {
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+  localStorage.removeItem(EMAIL_KEY);
+}
+
+async function restoreSession() {
+  const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+  const email = localStorage.getItem(EMAIL_KEY);
+  if (!refreshToken || !email) return;
+
+  const result = await callApi('/refresh', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: refreshToken })
+  });
+
+  // /refresh returns the new access token as a plain string, not wrapped in an object.
+  if (result.ok && typeof result.data === 'string') {
+    accessToken = result.data;
+    userEmail = email;
+    enterApp();
+  } else {
+    clearSession();
+  }
+}
+
+async function callApi(path, options = {}) {
+  const start = performance.now();
+  const response = await fetch(path, options);
+  const ms = Math.round(performance.now() - start);
+  const data = await response.json().catch(() => ({}));
+  return { ok: response.ok, status: response.status, data, ms };
+}
+
+function newIdempotencyKey() {
+  return crypto.randomUUID();
+}
+
+// ---- Auth ----
+
+function showAuthTab(which) {
+  const isLogin = which === 'login';
+  document.getElementById('tab-login').className = 'flex-1 pb-3 font-label-caps text-label-caps text-center ' +
+    (isLogin ? 'text-primary border-b-2 border-primary' : 'text-on-surface-variant border-b-2 border-transparent hover:text-primary transition-colors');
+  document.getElementById('tab-register').className = 'flex-1 pb-3 font-label-caps text-label-caps text-center ' +
+    (!isLogin ? 'text-primary border-b-2 border-primary' : 'text-on-surface-variant border-b-2 border-transparent hover:text-primary transition-colors');
+  document.getElementById('form-login').style.display = isLogin ? 'flex' : 'none';
+  document.getElementById('form-register').style.display = isLogin ? 'none' : 'flex';
+}
+
+async function doLogin() {
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  const errBox = document.getElementById('login-error');
+  errBox.classList.add('hidden-panel');
+  const result = await callApi('/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password })
+  });
+  if (result.ok && result.data.access_token) {
+    accessToken = result.data.access_token;
+    userEmail = email;
+    saveSession(result.data.refresh_token, email);
+    enterApp();
+  } else {
+    errBox.textContent = result.data.detail || 'Login failed.';
+    errBox.classList.remove('hidden-panel');
+  }
+}
+
+async function doRegister() {
+  const email = document.getElementById('reg-email').value;
+  const password = document.getElementById('reg-password').value;
+  const errBox = document.getElementById('register-error');
+  errBox.classList.add('hidden-panel');
+  const result = await callApi('/register', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password })
+  });
+  if (result.ok) {
+    // Registration doesn't log you in automatically -- switch to the login tab
+    // with the new email prefilled, same as most real signup flows.
+    document.getElementById('login-email').value = email;
+    document.getElementById('login-password').value = password;
+    showAuthTab('login');
+  } else {
+    errBox.textContent = (result.data && result.data.detail) || 'Registration failed. Email may already be taken.';
+    errBox.classList.remove('hidden-panel');
+  }
+}
+
+function enterApp() {
+  document.getElementById('view-auth').classList.add('hidden-panel');
+  document.getElementById('view-app').classList.remove('hidden-panel');
+  document.getElementById('whoami-email').textContent = userEmail;
+  document.getElementById('avatar').textContent = userEmail.charAt(0).toUpperCase();
+  document.getElementById('env-badge').innerHTML =
+    '<span class="w-2 h-2 rounded-full bg-green-500 inline-block"></span> ' +
+    (location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 'LOCAL' : location.hostname);
+  showPanel('dashboard');
+  loadNotifications();
+}
+
+function logout() {
+  accessToken = null;
+  userEmail = null;
+  clearSession();
+  document.getElementById('view-app').classList.add('hidden-panel');
+  document.getElementById('view-auth').classList.remove('hidden-panel');
+  showAuthTab('login');
+}
+
+// ---- Header: notifications + settings ----
+
+function toggleNotifications() {
+  const dropdown = document.getElementById('notif-dropdown');
+  const wasHidden = dropdown.classList.contains('hidden-panel');
+  document.getElementById('settings-dropdown').classList.add('hidden-panel');
+  dropdown.classList.toggle('hidden-panel');
+  if (wasHidden) loadNotifications();
+}
+
+function toggleSettings() {
+  const dropdown = document.getElementById('settings-dropdown');
+  document.getElementById('notif-dropdown').classList.add('hidden-panel');
+  document.getElementById('settings-account-id').value = MAIN_ACCOUNT_ID;
+  dropdown.classList.toggle('hidden-panel');
+}
+
+// Clicking outside either dropdown closes it.
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#notif-container')) document.getElementById('notif-dropdown').classList.add('hidden-panel');
+  if (!e.target.closest('#settings-container')) document.getElementById('settings-dropdown').classList.add('hidden-panel');
+});
+
+// Real recent postings for the current main account, shown as notifications.
+async function loadNotifications() {
+  document.getElementById('notif-account-id').textContent = MAIN_ACCOUNT_ID;
+  const result = await callApi(`/accounts/${MAIN_ACCOUNT_ID}/postings`);
+  const list = document.getElementById('notif-list');
+  const badge = document.getElementById('notif-badge');
+  list.innerHTML = '';
+
+  if (result.ok && result.data.length > 0) {
+    const recent = result.data.slice(0, 5);
+    badge.textContent = recent.length;
+    badge.classList.remove('hidden-panel');
+    badge.classList.add('flex');
+    recent.forEach(posting => {
+      const isDebit = posting.entry_type === 'DEBIT';
+      const color = isDebit ? 'text-error' : 'text-[#166534]';
+      const date = posting.created_at ? new Date(posting.created_at).toLocaleString() : '—';
+      list.innerHTML += `<div class="p-stack-md border-b border-outline-variant last:border-0">
+        <div class="flex justify-between items-baseline gap-stack-sm">
+          <span class="font-body-sm text-body-sm font-medium">${isDebit ? 'Debit' : 'Credit'} — Transaction #${posting.transaction_id}</span>
+          <span class="font-label-mono text-label-mono font-semibold ${color} whitespace-nowrap">${isDebit ? '-' : '+'}${Number(posting.amount).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}</span>
+        </div>
+        <div class="font-label-mono text-label-mono text-on-surface-variant text-[11px] mt-1">${date}</div>
+      </div>`;
+    });
+  } else {
+    badge.classList.add('hidden-panel');
+    list.innerHTML = '<div class="p-stack-md font-body-sm text-body-sm text-on-surface-variant text-center">No recent activity.</div>';
+  }
+}
+
+// Changes which account the Dashboard and Accounts pages show, then refreshes
+// whichever of those is currently on screen.
+function saveMainAccountId() {
+  const value = Number(document.getElementById('settings-account-id').value);
+  if (!value || value < 1) return;
+  MAIN_ACCOUNT_ID = value;
+  document.getElementById('settings-dropdown').classList.add('hidden-panel');
+  if (getComputedStyle(document.getElementById('panel-dashboard')).display !== 'none') loadMainAccountDashboard();
+  if (getComputedStyle(document.getElementById('panel-accounts')).display !== 'none') loadAccountDetail();
+}
+
+// ---- Navigation ----
+
+function showPanel(name) {
+  ['dashboard', 'accounts', 'transfer', 'activity', 'admin'].forEach(p => {
+    document.getElementById(`panel-${p}`).classList.toggle('hidden-panel', p !== name);
+  });
+  document.querySelectorAll('.nav-link').forEach(link => {
+    link.classList.toggle('active', link.dataset.panel === name);
+  });
+  if (name === 'dashboard') loadMainAccountDashboard();
+  if (name === 'accounts') loadAccountDetail();
+  closeSidebar(); // no-op on desktop, where the sidebar is always visible
+}
+
+// ---- Sidebar (mobile off-canvas drawer) ----
+
+function openSidebar() {
+  document.getElementById('sidebar').classList.add('sidebar-open');
+  document.getElementById('sidebar-backdrop').classList.remove('hidden-panel');
+}
+
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('sidebar-open');
+  document.getElementById('sidebar-backdrop').classList.add('hidden-panel');
+}
+
+function toggleSidebar() {
+  const isOpen = document.getElementById('sidebar').classList.contains('sidebar-open');
+  if (isOpen) closeSidebar(); else openSidebar();
+}
+
+// ---- Dashboard ----
+// This design has no account picker, so it always shows one fixed account.
+// Everything on it is real: balance, transaction count, and recent postings.
+let MAIN_ACCOUNT_ID = 1;
+
+async function loadMainAccountDashboard() {
+  const [summaryResult, postingsResult] = await Promise.all([
+    callApi(`/accounts/${MAIN_ACCOUNT_ID}/summary`),
+    callApi(`/accounts/${MAIN_ACCOUNT_ID}/postings`)
+  ]);
+
+  if (summaryResult.ok) {
+    document.getElementById('main-account-id').textContent = `Account #${summaryResult.data.account_id}`;
+    document.getElementById('main-balance-value').textContent =
+      summaryResult.data.balance.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+
+    const count = summaryResult.data.transaction_count;
+    const lastTxn = summaryResult.data.last_transaction_at
+      ? new Date(summaryResult.data.last_transaction_at).toLocaleDateString()
+      : 'no activity yet';
+    document.getElementById('main-balance-meta').textContent =
+      `${count} transaction${count === 1 ? '' : 's'} · Last: ${lastTxn}`;
+  }
+
+  const rows = document.getElementById('main-activity-rows');
+  const empty = document.getElementById('main-activity-empty');
+  rows.innerHTML = '';
+  if (postingsResult.ok && postingsResult.data.length > 0) {
+    empty.classList.add('hidden-panel');
+    // The backend has no free-text transaction description or "pending" state --
+    // every posting here is already settled by the time /transfers returns, and
+    // there's no counterparty name stored. These are the real fields, honestly labeled.
+    postingsResult.data.slice(0, 5).forEach(posting => {
+      const isDebit = posting.entry_type === 'DEBIT';
+      const date = posting.created_at
+        ? new Date(posting.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+        : '—';
+      rows.innerHTML += `<tr class="border-b border-outline-variant hover:bg-surface transition-colors cursor-default">
+        <td class="py-stack-md px-gutter whitespace-nowrap text-on-surface-variant font-label-mono text-label-mono">${date}</td>
+        <td class="py-stack-md px-gutter font-medium">${isDebit ? 'Debit' : 'Credit'} — Transaction #${posting.transaction_id}</td>
+        <td class="py-stack-md px-gutter font-label-mono text-label-mono text-on-surface-variant">TXN-${posting.transaction_id}</td>
+        <td class="py-stack-md px-gutter">
+          <span class="inline-flex items-center px-2 py-1 rounded-full bg-surface-container-high border border-outline-variant text-on-surface font-label-caps text-label-caps tracking-wider">Settled</span>
+        </td>
+        <td class="py-stack-md px-gutter text-right font-label-mono text-label-mono ${isDebit ? 'text-primary' : 'text-secondary'}">${isDebit ? '-' : '+'}${Number(posting.amount).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}</td>
+      </tr>`;
+    });
+  } else {
+    empty.classList.remove('hidden-panel');
+  }
+}
+
+// ---- Accounts (account detail) ----
+// Same fixed account as the Dashboard. The running "Balance" column isn't
+// stored anywhere -- it's computed here by walking the postings oldest-first
+// and tracking the total, then showing newest-first like the design does.
+async function loadAccountDetail() {
+  document.getElementById('acct-account-id').textContent = `ACCT: #${MAIN_ACCOUNT_ID}`;
+  document.getElementById('acct-export-link').href = `/accounts/${MAIN_ACCOUNT_ID}/statement`;
+
+  const [summaryResult, postingsResult] = await Promise.all([
+    callApi(`/accounts/${MAIN_ACCOUNT_ID}/summary`),
+    callApi(`/accounts/${MAIN_ACCOUNT_ID}/postings`)
+  ]);
+
+  if (summaryResult.ok) {
+    document.getElementById('acct-balance-value').textContent =
+      summaryResult.data.balance.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+  }
+
+  const rows = document.getElementById('acct-transaction-rows');
+  const empty = document.getElementById('acct-transaction-empty');
+  rows.innerHTML = '';
+  if (postingsResult.ok && postingsResult.data.length > 0) {
+    empty.classList.add('hidden-panel');
+
+    // /accounts/{id}/postings only returns the 50 most recent postings, but this
+    // account can have far more history than that (over 1000 in testing). Starting
+    // a running total from 0 over just those 50 would drift from the real balance.
+    // Instead, anchor to the real current balance and walk backward, undoing each
+    // posting's effect to get the balance that was in force right after it happened.
+    let running = summaryResult.ok ? summaryResult.data.balance : 0;
+    const withRunningBalance = postingsResult.data.map(posting => {
+      const balanceAfter = running;
+      running += posting.entry_type === 'DEBIT' ? posting.amount : -posting.amount;
+      return { ...posting, balanceAfter };
+    });
+
+    withRunningBalance.forEach(posting => {
+      const isDebit = posting.entry_type === 'DEBIT';
+      const color = isDebit ? 'text-error' : 'text-[#166534]';
+      const date = posting.created_at ? new Date(posting.created_at).toLocaleDateString() : '—';
+      const money = n => Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+      rows.innerHTML += `<tr class="border-b border-surface-variant hover:bg-surface-bright transition-colors">
+        <td class="py-stack-md px-gutter font-label-mono text-label-mono text-on-surface-variant">${date}</td>
+        <td class="py-stack-md px-gutter">
+          <div class="font-semibold text-primary">${isDebit ? 'Debit' : 'Credit'} — Transaction #${posting.transaction_id}</div>
+          <div class="text-on-surface-variant text-[12px] mt-1">TXN-${posting.transaction_id}</div>
+        </td>
+        <td class="py-stack-md px-gutter text-right font-label-mono text-label-mono ${color}">${isDebit ? '-' : '+'}${money(posting.amount)}</td>
+        <td class="py-stack-md px-gutter text-right font-label-mono text-label-mono text-primary">${money(posting.balanceAfter)}</td>
+      </tr>`;
+    });
+  } else {
+    empty.classList.remove('hidden-panel');
+  }
+}
+
+// Renders a list of postings into a table body. Used by the Activity page.
+// Uses a raw hex green since the design system has no dedicated "positive"
+// token -- the same workaround the mockups themselves used for credit amounts.
+function renderPostingsRows(tbodyId, emptyId, postings, limit) {
+  const rows = document.getElementById(tbodyId);
+  const empty = document.getElementById(emptyId);
+  rows.innerHTML = '';
+  const shown = limit ? postings.slice(0, limit) : postings;
+  if (shown.length > 0) {
+    empty.classList.add('hidden-panel');
+    shown.forEach(posting => {
+      const isDebit = posting.entry_type === 'DEBIT';
+      const color = isDebit ? 'text-error' : 'text-[#166534]';
+      const date = posting.created_at ? new Date(posting.created_at).toLocaleDateString() : '—';
+      rows.innerHTML += `<tr class="border-b border-outline-variant last:border-0">
+        <td class="py-stack-sm px-gutter whitespace-nowrap text-on-surface-variant font-label-mono text-label-mono">${date}</td>
+        <td class="py-stack-sm px-gutter"><span class="${color} font-semibold text-xs">${posting.entry_type}</span></td>
+        <td class="py-stack-sm px-gutter text-on-surface-variant font-label-mono text-label-mono">TXN-${posting.transaction_id}</td>
+        <td class="py-stack-sm px-gutter text-right font-semibold font-label-mono text-label-mono ${color}">${isDebit ? '-' : '+'}${Number(posting.amount).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}</td>
+      </tr>`;
+    });
+  } else {
+    empty.classList.remove('hidden-panel');
+  }
+}
+
+// ---- Transfer ----
+
+let pendingTransfer = null;
+
+function reviewTransfer() {
+  pendingTransfer = {
+    from_account: Number(document.getElementById('xfer-from').value),
+    to_account: Number(document.getElementById('xfer-to').value),
+    amount: Number(document.getElementById('xfer-amount').value),
+    idempotency_key: newIdempotencyKey()
+  };
+  document.getElementById('confirm-from').textContent = `#${pendingTransfer.from_account}`;
+  document.getElementById('confirm-to').textContent = `#${pendingTransfer.to_account}`;
+  document.getElementById('confirm-amount').textContent = pendingTransfer.amount.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+  document.getElementById('confirm-modal').classList.remove('hidden');
+  document.getElementById('confirm-modal').classList.add('flex');
+}
+
+function hideModal() {
+  document.getElementById('confirm-modal').classList.add('hidden');
+  document.getElementById('confirm-modal').classList.remove('flex');
+}
+
+async function executeTransfer() {
+  const btn = document.getElementById('confirm-send-btn');
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="material-symbols-outlined text-lg animate-spin">progress_activity</span> Sending...';
+
+  const result = await callApi('/transfers', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(pendingTransfer)
+  });
+
+  const resultBox = document.getElementById('xfer-result');
+  resultBox.classList.remove('hidden-panel');
+  if (result.ok) {
+    resultBox.innerHTML = `<div class="font-body-sm text-body-sm text-[#166534] bg-green-50 border border-green-200 rounded px-4 py-3">
+      <span class="material-symbols-outlined text-base align-middle">check_circle</span>
+      Transfer #${result.data.id} completed.</div>`;
+  } else {
+    resultBox.innerHTML = `<div class="font-body-sm text-body-sm text-error bg-error-container rounded px-4 py-3">
+      <span class="material-symbols-outlined text-base align-middle">error</span>
+      Transfer failed (${result.status}).</div>`;
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = original;
+  hideModal();
+}
+
+// ---- Activity ----
+
+async function loadActivity() {
+  const id = document.getElementById('activity-account-id').value;
+  const result = await callApi(`/accounts/${id}/postings`);
+  if (result.ok) {
+    renderPostingsRows('activity-rows', 'activity-empty', result.data);
+  }
+}
+
+// ---- System / Admin ----
+
+async function runInvariantCheck() {
+  const body = document.getElementById('invariant-body');
+  body.innerHTML = '<p class="text-slate-500 font-body-sm text-body-sm">Checking...</p>';
+  const result = await callApi('/system/invariant-check');
+  if (!result.ok) {
+    body.innerHTML = '<p class="text-red-400 font-body-sm text-body-sm">Request failed.</p>';
+    return;
+  }
+  const { total_debits, total_credits, balanced } = result.data;
+  body.innerHTML = `
+    <div class="flex justify-between items-baseline border-b border-slate-800 pb-2">
+      <span class="text-slate-400 font-body-sm text-body-sm">Total debits</span>
+      <span class="font-label-mono text-white text-lg">${Number(total_debits).toLocaleString()}</span>
+    </div>
+    <div class="flex justify-between items-baseline border-b border-slate-800 pb-2">
+      <span class="text-slate-400 font-body-sm text-body-sm">Total credits</span>
+      <span class="font-label-mono text-white text-lg">${Number(total_credits).toLocaleString()}</span>
+    </div>
+    <div class="mt-2 flex items-center justify-center rounded py-2.5 ${balanced ? 'bg-green-900/20 border border-green-800/50' : 'bg-red-900/20 border border-red-800/50'}">
+      <span class="material-symbols-outlined ${balanced ? 'text-green-500' : 'text-red-500'} mr-2 text-base filled-icon">${balanced ? 'check_circle' : 'error'}</span>
+      <span class="font-label-caps text-label-caps ${balanced ? 'text-green-500' : 'text-red-500'}">${balanced ? 'Balanced' : 'Out of balance'}</span>
+    </div>`;
+}
+
+async function runAuditVerify() {
+  const body = document.getElementById('audit-body');
+  body.innerHTML = '<p class="text-slate-500 font-body-sm text-body-sm">Checking...</p>';
+  const result = await callApi('/system/audit-verify');
+  if (!result.ok) {
+    body.innerHTML = '<p class="text-red-400 font-body-sm text-body-sm">Request failed.</p>';
+    return;
+  }
+  const data = result.data;
+  if (data.valid) {
+    body.innerHTML = `
+      <div class="flex justify-between items-baseline border-b border-slate-800 pb-2">
+        <span class="text-slate-400 font-body-sm text-body-sm">Entries checked</span>
+        <span class="font-label-mono text-white text-lg">${data.entries_checked}</span>
+      </div>
+      <div class="mt-2 flex items-center justify-center rounded py-2.5 bg-green-900/20 border border-green-800/50">
+        <span class="material-symbols-outlined text-green-500 mr-2 text-base filled-icon">verified_user</span>
+        <span class="font-label-caps text-label-caps text-green-500">Chain intact</span>
+      </div>`;
+  } else {
+    body.innerHTML = `
+      <div class="flex justify-between items-baseline border-b border-slate-800 pb-2">
+        <span class="text-slate-400 font-body-sm text-body-sm">Broken at entry</span>
+        <span class="font-label-mono text-white text-lg">#${data.broken_at_entry_id}</span>
+      </div>
+      <div class="mt-2 flex items-center justify-center rounded py-2.5 bg-red-900/20 border border-red-800/50">
+        <span class="material-symbols-outlined text-red-500 mr-2 text-base filled-icon">gpp_bad</span>
+        <span class="font-label-caps text-label-caps text-red-500">${data.reason}</span>
+      </div>`;
+  }
+}
+
+// Fires real concurrent POST /transfers at the API -- every line in the
+// terminal below is a genuine response, not simulated. This exercises the
+// same SERIALIZABLE + retry logic covered in chaos_test.py.
+async function runConcurrencySim() {
+  const btn = document.getElementById('sim-run-btn');
+  const terminal = document.getElementById('sim-terminal');
+  if (btn.disabled) return;
+
+  const from_account = Number(document.getElementById('sim-from').value);
+  const to_account = Number(document.getElementById('sim-to').value);
+  const amount = Number(document.getElementById('sim-amount').value);
+  const count = Math.min(Number(document.getElementById('sim-count').value) || 1, 200);
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">refresh</span> Running...';
+  terminal.innerHTML = `<div class="text-slate-500">&gt; Firing ${count} concurrent transfers (account #${from_account} -&gt; #${to_account}, $${amount} each)...</div>`;
+
+  const requests = Array.from({ length: count }, (_, i) =>
+    callApi('/transfers', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from_account, to_account, amount, idempotency_key: newIdempotencyKey() })
+    }).then(result => {
+      const line = document.createElement('div');
+      const label = result.ok ? 'succeeded' : (result.status === 409 ? 'rejected (conflict)' : `failed (${result.status})`);
+      const color = result.ok ? 'text-green-500' : (result.status === 409 ? 'text-yellow-500' : 'text-red-500');
+      line.className = 'flex gap-3';
+      line.innerHTML = `<span class="text-slate-600">#${i + 1}</span><span class="${color} flex-1">${label}</span><span class="text-slate-600 w-14 text-right">${result.ms}ms</span>`;
+      terminal.appendChild(line);
+      terminal.scrollTop = terminal.scrollHeight;
+      return result;
+    })
+  );
+
+  const results = await Promise.all(requests);
+  const succeeded = results.filter(r => r.ok).length;
+  const avgMs = Math.round(results.reduce((sum, r) => sum + r.ms, 0) / results.length);
+  const summary = document.createElement('div');
+  summary.className = 'mt-2 pt-2 border-t border-slate-800 text-slate-400';
+  summary.textContent = `> Done. ${succeeded}/${count} succeeded. Average latency: ${avgMs}ms.`;
+  terminal.appendChild(summary);
+  terminal.scrollTop = terminal.scrollHeight;
+
+  btn.disabled = false;
+  btn.innerHTML = '<span class="material-symbols-outlined text-sm">play_arrow</span> Run';
+}
+
+// Runs once when the page loads. Shows the app immediately if a stored
+// session is still valid, otherwise leaves the login screen showing.
+restoreSession();
+</script>
+
+</body>
+</html>

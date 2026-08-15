@@ -41,6 +41,7 @@ class PostingModel(Base):
     account_id: Mapped[int] = mapped_column(nullable=False)# whose ledger this line is written to
     entry_type: Mapped[str] = mapped_column(nullable=False)
     amount: Mapped[float] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
 # An event waiting to be sent to Kafka. This is the "outbox pattern":

@@ -12,6 +12,12 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # Checks that Postgres is actually ready to accept connections, not just started.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
 
   # Kafka carries events between the app and the background outbox worker.
   kafka:
@@ -36,9 +42,16 @@ services:
     environment:
       DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres/fastapi_db"
       KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+      # The Dockerfile reads $PORT to know which port to listen on.
+      # Render sets this itself; locally we set it to match the port mapping above.
+      PORT: "8000"
     depends_on:
-      - postgres
-      - kafka
+      # Wait for Postgres to be ready, not just running, so the app doesn't
+      # try to connect before the database can accept connections.
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
 
 volumes:
   pgdata:

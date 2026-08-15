@@ -3,6 +3,7 @@
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.responses import FileResponse, StreamingResponse
 from database import engine, get_db, Base, AsyncSessionLocal, KAFKA_BOOTSTRAP_SERVERS
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -10,7 +11,7 @@ from models import UserModel, TransactionModel, PostingModel, OutboxModel, Proce
 from auth import hash_password, verify_password, create_access_token, decode_access_token, create_refresh_token
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
-import json, asyncio, http, uuid, logging
+import json, asyncio, http, uuid, logging, csv, io
 from sqlalchemy.exc import OperationalError, DBAPIError
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 import hashlib
@@ -97,6 +98,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl='login')
 
+# Serve the simple frontend page at the root URL.
+@app.get('/', include_in_schema=False)
+async def frontend():
+    return FileResponse('static/index.html')
+
 
 # What a client must send to register or log in.
 class User(BaseModel):
@@ -134,7 +140,10 @@ async def login(user: User, db=Depends(get_db)):
     password = verify_password(user.password, db_user.hashed_password)
     if not password:
         raise HTTPException(status_code=401, detail='Invalid email or password')
-    return create_access_token({'sub': user.email})
+    return {
+        'access_token': create_access_token({'sub': user.email}),
+        'refresh_token': create_refresh_token({'sub': user.email}),
+    }
 
 # Read the access token from the request and return the matching user.
 # Other routes use this to know who is calling them.
@@ -272,12 +281,64 @@ async def transfer(transaction: TransferRequest, db=Depends(get_db)):
     raise HTTPException(status_code=409, detail="Transfer could not complete, please try again")
 
 
-# Work out an account's balance by adding up all its postings.
+# Add up a list of postings into a single balance.
 # Debits reduce the balance, credits increase it.
+def compute_balance(postings) -> float:
+    balance = 0
+    for posting in postings:
+        if posting.entry_type == 'DEBIT':
+            balance -= posting.amount
+        else:
+            balance += posting.amount
+    return balance
+
+
+# Work out an account's balance by adding up all its postings.
 @app.get('/accounts/{id}/balance')
 async def get_balance(id: int, db=Depends(get_db)):
     result = await db.execute(select(PostingModel).where(PostingModel.account_id == id))
     postings = result.scalars().all()
+    return {"account_id": id, "balance": compute_balance(postings)}
+
+
+# List an account's most recent postings (its "activity"), newest first.
+@app.get('/accounts/{id}/postings')
+async def get_account_postings(id: int, db=Depends(get_db)):
+    result = await db.execute(
+        select(PostingModel).where(PostingModel.account_id == id).order_by(PostingModel.id.desc()).limit(50)
+    )
+    return result.scalars().all()
+
+
+# A quick summary for the dashboard: balance, how many transactions touched
+# this account, and when the most recent one happened.
+@app.get('/accounts/{id}/summary')
+async def get_account_summary(id: int, db=Depends(get_db)):
+    result = await db.execute(select(PostingModel).where(PostingModel.account_id == id))
+    postings = result.scalars().all()
+
+    last_transaction_at = max((p.created_at for p in postings), default=None)
+
+    return {
+        "account_id": id,
+        "balance": compute_balance(postings),
+        "transaction_count": len(postings),
+        "last_transaction_at": last_transaction_at,
+    }
+
+
+# Download an account's full history as a CSV statement, oldest first, with a
+# running balance column so each row shows the balance right after that posting.
+@app.get('/accounts/{id}/statement')
+async def export_account_statement(id: int, db=Depends(get_db)):
+    result = await db.execute(
+        select(PostingModel).where(PostingModel.account_id == id).order_by(PostingModel.id.asc())
+    )
+    postings = result.scalars().all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Date", "Transaction", "Type", "Amount", "Balance"])
 
     balance = 0
     for posting in postings:
@@ -285,8 +346,19 @@ async def get_balance(id: int, db=Depends(get_db)):
             balance -= posting.amount
         else:
             balance += posting.amount
+        writer.writerow([
+            posting.created_at.isoformat() if posting.created_at else "",
+            f"TXN-{posting.transaction_id}",
+            posting.entry_type,
+            f"{posting.amount:.2f}",
+            f"{balance:.2f}",
+        ])
 
-    return {"account_id": id, "balance": balance}
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=account-{id}-statement.csv"},
+    )
 
 
 # Check that the whole ledger is balanced: total debits should equal total credits.

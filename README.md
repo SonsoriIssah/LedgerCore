@@ -63,8 +63,62 @@ All of these fall back to sane localhost defaults for local development.
 
 ## What's tested
 
-- `pytest test_ledgercore.py -v` covers successful transfers, idempotency-key deduplication, the system-wide invariant, and safe behavior under concurrent load. Requires the app running on `localhost:8001` (a separate instance from the Docker Compose one on port 8000 see `CLAUDE.md` for the exact commands).
-- **Chaos/load test** (`python chaos_test.py`): 50 concurrent transfers fired at the same account under `SERIALIZABLE` isolation. Every request returned either a completed transfer or a clean `409` zero unhandled failures, invariant held throughout. (An earlier version of this test surfaced a real bug: the retry loop's exception handler was too narrow and didn't catch Postgres's actual serialization error, causing conflicts to crash as 500s instead of retrying fixed by broadening the caught exception types.)
+- `pytest` runs two small, fast suites that need nothing running:
+  `tests/test_regressions.py` pins down two performance fixes that are easy to
+  undo by accident (see *Performance notes* below) — both were verified to fail
+  when their fix is reverted.
+- `pytest tests/test_ledgercore.py -v` covers successful transfers,
+  idempotency-key deduplication, the system-wide invariant, and safe behavior
+  under concurrent load. These are integration tests: they need the app running
+  on `localhost:8001` (see `DEVELOPMENT.md`).
+- **Chaos/load test** (`python tests/chaos_test.py`): 50 concurrent transfers
+  fired at the same account under `SERIALIZABLE` isolation. Every request
+  returned either a completed transfer or a clean `409` — zero unhandled
+  failures, invariant held throughout. (An earlier version of this test
+  surfaced a real bug: the retry loop's exception handler was too narrow and
+  didn't catch Postgres's actual serialization error, causing conflicts to
+  crash as 500s instead of retrying — fixed by broadening the caught
+  exception types.)
+
+## Performance notes
+
+Two fixes, both measured on a local single-worker setup against PostgreSQL 16
+in Docker, with Kafka absent:
+
+- **The audit-chain lookup is bounded (`LIMIT 1`).** It reads only the newest
+  `audit_log` row. Without the limit, Postgres returned the entire table and
+  SQLAlchemy built an ORM object per row, so each transfer's cost grew with
+  the ledger's whole history — roughly 48 ms with an empty table rising to
+  1.6 s at 75,000 entries. With it, cost stays flat (~35 ms). The existing
+  `ix_audit_log_id` index already serves this as an index scan; no new index
+  was needed.
+- **Retries back off with jitter.** Transfers retry up to 3 times on
+  `SERIALIZABLE` conflicts. They previously retried instantly and re-collided
+  in lockstep; a short jittered delay (30 ms base, exponential, capped so the
+  total added wait stays under 100 ms) spreads them out instead.
+
+SQL statement logging is off by default and enabled with `SQL_ECHO=1` — it
+writes several lines per query, which is useful locally and costly in
+production.
+
+### Known limitation: the audit chain is a global write bottleneck
+
+Every transfer reads the single newest `audit_log` row and appends the next
+one, so under `SERIALIZABLE` **every transfer conflicts with every other
+transfer ledger-wide** — not just those touching the same accounts. Confirmed
+directly: 500 concurrent transfers in which every request used a distinct,
+non-overlapping account pair still produced conflicts on the large majority.
+
+Practically, this means ledger-wide write throughput is capped by one
+serialized append point, and adding workers, connections, or CPU will not
+raise that ceiling. Under heavy concurrency most transfers exhaust their
+retries and return a clean `409` rather than failing unsafely — no invariant
+was ever violated in testing — but the ceiling is real.
+
+Fixing it properly means taking the global chain off the write path (for
+example per-account chains, or moving hash-chaining to an asynchronous worker
+fed by the existing outbox). That is a design change and has **not** been
+attempted here.
 
 ## Stack
 

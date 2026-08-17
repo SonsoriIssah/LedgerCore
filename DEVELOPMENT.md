@@ -1,6 +1,6 @@
-# CLAUDE.md
+# Development Guide
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Notes on running, testing, and understanding the architecture of this repository.
 
 ## Commands
 
@@ -11,23 +11,29 @@ docker compose up --build
 App + web UI: http://localhost:8000 — interactive API docs at `/docs`.
 
 ### Run tests
-Tests are integration tests against a live server on **port 8001** (not the
-docker-compose app on 8000, and not `TestClient`-based). Start the app
-separately first:
+`tests/test_regressions.py` needs nothing running — it inspects the transfer
+query and retry policy directly:
+```
+pytest tests/test_regressions.py -v
+```
+
+`tests/test_ledgercore.py` is an integration suite against a live server on
+**port 8001** (not the docker-compose app on 8000, and not `TestClient`-based).
+Start the app separately first:
 ```
 uvicorn main:app --port 8001
-pytest test_ledgercore.py -v
+pytest tests/test_ledgercore.py -v
 ```
 Run a single test:
 ```
-pytest test_ledgercore.py::test_transfer_completes -v
+pytest tests/test_ledgercore.py::test_transfer_completes -v
 ```
 
 ### Chaos/load test
 Fires 50 concurrent transfers at the same account to exercise the
 SERIALIZABLE retry path. Also expects the app on port 8001:
 ```
-python chaos_test.py
+python tests/chaos_test.py
 ```
 
 ### Rebuild after changing backend or frontend code

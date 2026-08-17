@@ -11,8 +11,8 @@ from models import UserModel, TransactionModel, PostingModel, OutboxModel, Proce
 from auth import hash_password, verify_password, create_access_token, decode_access_token, create_refresh_token
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
-import json, asyncio, http, uuid, logging, csv, io
-from sqlalchemy.exc import OperationalError, DBAPIError
+import json, asyncio, http, uuid, logging, csv, io, random
+from sqlalchemy.exc import OperationalError, DBAPIError, IntegrityError
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 import hashlib
 
@@ -28,15 +28,20 @@ async def outbox_poller():
         logger.warning("Outbox poller not started: Kafka producer unavailable")
         return
     while True:
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(select(OutboxModel).where(OutboxModel.published == False))
-            events = result.scalars().all()
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(select(OutboxModel).where(OutboxModel.published == False))
+                events = result.scalars().all()
 
-            for event in events:
-                await producer.send_and_wait("ledger-events", event.payload.encode('utf-8'))
-                event.published = True
+                for event in events:
+                    await producer.send_and_wait("ledger-events", event.payload.encode('utf-8'))
+                    event.published = True
 
-            await db.commit()
+                await db.commit()
+        except Exception:
+            # A transient Kafka/DB error here must not kill this loop -- unpublished
+            # events just stay unpublished and get retried on the next cycle.
+            logger.exception("Outbox poller failed to publish events; will retry next cycle")
 
         await asyncio.sleep(5)
 
@@ -94,6 +99,13 @@ async def lifespan(app: FastAPI):
         producer = candidate_producer
     except Exception:
         logger.warning("Kafka unavailable at %s; starting without event publishing", KAFKA_BOOTSTRAP_SERVERS, exc_info=True)
+        # Shut the failed producer down explicitly. Without this its internal
+        # background task keeps retrying the unreachable broker forever,
+        # logging on every cycle for the life of the process.
+        try:
+            await candidate_producer.stop()
+        except Exception:
+            pass
         producer = None
     poller_task = asyncio.create_task(outbox_poller())
     consumer_task = asyncio.create_task(outbox_consumer())
@@ -134,7 +146,11 @@ async def register(user: User, db=Depends(get_db)):
     password = hash_password(user.password)
     db_user = UserModel(email=user.email, hashed_password=password, role='user')
     db.add(db_user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail='Email already registered')
     await db.refresh(db_user)
     return db_user
 
@@ -200,6 +216,39 @@ def require_role(required_role: str):
 # The starting hash for the audit trail. The very first entry links back to this.
 GENESIS_HASH = "0" * 64
 
+# Retry policy for /transfers under SERIALIZABLE conflicts.
+#
+# Without a delay between attempts, conflicting transfers retry instantly and
+# immediately collide again -- the losers keep colliding in lockstep and burn
+# all their attempts inside a few milliseconds. Backing off spreads them out;
+# the random jitter is what actually breaks the lockstep, since a fixed delay
+# would just move every loser to the same later instant.
+#
+# Bounded on purpose: total added delay is at most
+# BACKOFF_BASE_SECONDS * (1 + 2) * (jitter <= 1.0) = 90 ms before the caller
+# gets a 409, so a hot account can't turn into an unbounded stall.
+TRANSFER_MAX_ATTEMPTS = 3
+BACKOFF_BASE_SECONDS = 0.03
+
+
+async def _backoff_delay(attempt: int) -> None:
+    """Sleep before retrying attempt N (0-indexed): exponential, fully jittered."""
+    ceiling = BACKOFF_BASE_SECONDS * (2 ** attempt)
+    await asyncio.sleep(random.uniform(0, ceiling))
+
+
+def latest_audit_entry_query():
+    """The query that finds the newest audit_log row to chain onto.
+
+    Pulled out as a named function so a test can assert on the SQL it
+    generates. The LIMIT is the whole point: only the newest row is ever
+    used, and without it Postgres returns the entire audit_log while
+    SQLAlchemy builds an ORM object per row -- making each transfer cost
+    grow with the ledger's full history. The existing ix_audit_log_id index
+    turns this into an index scan backward, so it stays O(1) as history grows.
+    """
+    return select(AuditLogModel).order_by(AuditLogModel.id.desc()).limit(1)
+
 # Turn one transaction's details into a single hash (a short fingerprint).
 # Each entry includes the previous entry's hash, so the entries form a chain.
 # If any old entry is changed, the chain breaks and it is easy to detect.
@@ -213,10 +262,11 @@ def compute_entry_hash(transaction_id: int, amount: float, status: str, previous
 #   2. Creates the transaction and its two postings (one debit, one credit).
 #   3. Adds an event to the outbox, so Kafka can be told about it later.
 #   4. Adds a new entry to the audit trail.
-#   5. Retries up to 3 times if the database is busy.
+#   5. Retries up to TRANSFER_MAX_ATTEMPTS times, with jittered backoff, if the
+#      database reports a conflict.
 @app.post('/transfers')
 async def transfer(transaction: TransferRequest, db=Depends(get_db)):
-    for attempt in range(3):
+    for attempt in range(TRANSFER_MAX_ATTEMPTS):
         try:
             await db.connection(execution_options={"isolation_level": "SERIALIZABLE"})
 
@@ -233,8 +283,7 @@ async def transfer(transaction: TransferRequest, db=Depends(get_db)):
                 status='pending'
             )
             db.add(db_transaction)
-            await db.commit()
-            await db.refresh(db_transaction)
+            await db.flush()
 
             # Every transfer makes two postings: money leaves one account (debit)
             # and enters another account (credit). Together they must balance.
@@ -268,7 +317,7 @@ async def transfer(transaction: TransferRequest, db=Depends(get_db)):
             db_transaction.status = 'completed'
 
             # Add this transfer to the audit trail, linked to the previous entry's hash.
-            last_entry_result = await db.execute(select(AuditLogModel).order_by(AuditLogModel.id.desc()))
+            last_entry_result = await db.execute(latest_audit_entry_query())
             last_entry = last_entry_result.scalars().first()
             previous_hash = last_entry.entry_hash if last_entry else GENESIS_HASH
             new_hash = compute_entry_hash(db_transaction.id, db_transaction.amount, db_transaction.status, previous_hash)
@@ -283,8 +332,13 @@ async def transfer(transaction: TransferRequest, db=Depends(get_db)):
             await db.refresh(db_transaction)
             return db_transaction
         except (OperationalError,DBAPIError):
-            # The database was busy or had a conflict. Try again from the top.
+            # The database was busy or had a conflict. Back off briefly so the
+            # competing transfers don't just collide again instantly, then try
+            # again from the top. No sleep after the final attempt -- that delay
+            # would only slow down the 409 the caller is already getting.
             await db.rollback()
+            if attempt < TRANSFER_MAX_ATTEMPTS - 1:
+                await _backoff_delay(attempt)
             continue
     raise HTTPException(status_code=409, detail="Transfer could not complete, please try again")
 

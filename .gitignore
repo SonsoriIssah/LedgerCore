@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Env files with real secrets/config
+.env
+
+# Editor settings
+.vscode/

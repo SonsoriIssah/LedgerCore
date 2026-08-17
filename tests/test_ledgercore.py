@@ -5,8 +5,23 @@ import pytest
 import httpx
 import uuid
 import asyncio
+import socket
 
 BASE_URL = "http://127.0.0.1:8001"
+
+
+def _server_is_running() -> bool:
+    with socket.socket() as probe:
+        probe.settimeout(0.5)
+        return probe.connect_ex(("127.0.0.1", 8001)) == 0
+
+
+# Skip rather than fail when the app isn't up, so a plain `pytest` on a fresh
+# clone reports these as skipped instead of a wall of connection errors.
+pytestmark = pytest.mark.skipif(
+    not _server_is_running(),
+    reason="needs the app running on port 8001 -- see DEVELOPMENT.md",
+)
 
 # A normal transfer should succeed and come back marked as completed.
 @pytest.mark.asyncio

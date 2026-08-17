@@ -31,4 +31,5 @@ async def run_chaos_test(n=50):
         result = await client.get("http://localhost:8001/system/invariant-check")
         print(result.json())
 
-asyncio.run(run_chaos_test())
+if __name__ == "__main__":
+    asyncio.run(run_chaos_test())

@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from database import engine, get_db, Base, AsyncSessionLocal, KAFKA_BOOTSTRAP_SERVERS
 from pydantic import BaseModel
 from sqlalchemy import select, text
-from models import UserModel, TransactionModel, PostingModel, OutboxModel, ProcessedEventModel, AuditLogModel
+from models import UserModel, AccountModel, TransactionModel, PostingModel, OutboxModel, ProcessedEventModel, AuditLogModel
 from auth import hash_password, verify_password, create_access_token, decode_access_token, create_refresh_token
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
@@ -91,6 +91,25 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE postings ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()"
         ))
+        await conn.execute(text(
+            "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()"
+        ))
+        # One account per user, and every account owned by a real user. These
+        # are constraints rather than columns, so there is no ADD ... IF NOT
+        # EXISTS form -- hence the explicit catalog check. Databases created
+        # after these were added to models.py already have them and skip this.
+        await conn.execute(text("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'accounts_owner_id_key') THEN
+                    ALTER TABLE accounts ADD CONSTRAINT accounts_owner_id_key UNIQUE (owner_id);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'accounts_owner_id_fkey') THEN
+                    ALTER TABLE accounts ADD CONSTRAINT accounts_owner_id_fkey
+                        FOREIGN KEY (owner_id) REFERENCES "user"(id);
+                END IF;
+            END $$;
+        """))
     try:
         # Try to connect to Kafka. If it fails, keep the app running without it,
         # so the API still works even if Kafka is down or not set up yet.
@@ -140,19 +159,44 @@ class TransferRequest(BaseModel):
     amount: float
     idempotency_key: str
 
-# Create a new user account. The password is hashed before it is saved.
+# Create a new user, plus the one ledger account that belongs to them.
+# Both are written in a single transaction: a user without an account would
+# have nowhere to hold money and no way to receive a transfer, so a partial
+# result here is never useful.
 @app.post('/register')
 async def register(user: User, db=Depends(get_db)):
     password = hash_password(user.password)
     db_user = UserModel(email=user.email, hashed_password=password, role='user')
     db.add(db_user)
     try:
+        # flush (not commit) to get the generated user id while staying inside
+        # the same transaction as the account insert below.
+        await db.flush()
+        account = AccountModel(owner_id=db_user.id, currency='USD')
+        db.add(account)
         await db.commit()
     except IntegrityError:
         await db.rollback()
         raise HTTPException(status_code=409, detail='Email already registered')
     await db.refresh(db_user)
-    return db_user
+    await db.refresh(account)
+    return {
+        'id': db_user.id,
+        'email': db_user.email,
+        'role': db_user.role,
+        'account_id': account.id,
+    }
+
+
+# Look up the one account belonging to a user. Every registered user has
+# exactly one, but users created before accounts existed do not -- hence the
+# explicit error rather than an attribute access on None.
+async def get_own_account(db, user: UserModel) -> AccountModel:
+    result = await db.execute(select(AccountModel).where(AccountModel.owner_id == user.id))
+    account = result.scalars().first()
+    if account is None:
+        raise HTTPException(status_code=404, detail='No account found for this user')
+    return account
 
 # Check a user's email and password, and give back an access token if they are correct.
 @app.post('/login')
@@ -264,8 +308,36 @@ def compute_entry_hash(transaction_id: int, amount: float, status: str, previous
 #   4. Adds a new entry to the audit trail.
 #   5. Retries up to TRANSFER_MAX_ATTEMPTS times, with jittered backoff, if the
 #      database reports a conflict.
+#
+# Requires a logged-in caller, who may only send money FROM their own account.
+# The destination can be anyone's account -- that's how one user pays another.
 @app.post('/transfers')
-async def transfer(transaction: TransferRequest, db=Depends(get_db)):
+async def transfer(transaction: TransferRequest, db=Depends(get_db), current_user=Depends(get_current_user)):
+    own_account = await get_own_account(db, current_user)
+
+    # Authorisation, checked once before the retry loop: this depends only on
+    # who is calling and what they asked for, so a serialization conflict can
+    # never change the answer, and re-checking it on every attempt would just
+    # repeat the same two queries.
+    if transaction.from_account != own_account.id:
+        raise HTTPException(
+            status_code=403,
+            detail='You can only send money from your own account',
+        )
+
+    if transaction.to_account == own_account.id:
+        raise HTTPException(status_code=400, detail='Cannot transfer to your own account')
+
+    if transaction.amount <= 0:
+        raise HTTPException(status_code=400, detail='Amount must be greater than zero')
+
+    # The destination has to be a real account. Without this a typo'd account
+    # number silently creates postings against an account that doesn't exist,
+    # and the money is simply gone.
+    destination = await db.execute(select(AccountModel).where(AccountModel.id == transaction.to_account))
+    if destination.scalars().first() is None:
+        raise HTTPException(status_code=404, detail=f'No account with id {transaction.to_account}')
+
     for attempt in range(TRANSFER_MAX_ATTEMPTS):
         try:
             await db.connection(execution_options={"isolation_level": "SERIALIZABLE"})
@@ -355,9 +427,36 @@ def compute_balance(postings) -> float:
     return balance
 
 
+# Every /accounts/{id}/* route below reads one person's financial history, so
+# each one goes through here first: you may only look at the account you own.
+# Returning 404 rather than 403 for someone else's account is deliberate --
+# 403 would confirm that the account number exists, which is a small
+# enumeration leak when account ids are sequential.
+async def authorize_account_access(id: int, db, current_user: UserModel) -> None:
+    own_account = await get_own_account(db, current_user)
+    if id != own_account.id:
+        raise HTTPException(status_code=404, detail='Account not found')
+
+
+# Who am I, and which account is mine? The frontend calls this right after
+# login so it never has to guess or hardcode an account number.
+@app.get('/accounts/me')
+async def get_my_account(db=Depends(get_db), current_user=Depends(get_current_user)):
+    account = await get_own_account(db, current_user)
+    result = await db.execute(select(PostingModel).where(PostingModel.account_id == account.id))
+    postings = result.scalars().all()
+    return {
+        "account_id": account.id,
+        "owner_email": current_user.email,
+        "currency": account.currency,
+        "balance": compute_balance(postings),
+    }
+
+
 # Work out an account's balance by adding up all its postings.
 @app.get('/accounts/{id}/balance')
-async def get_balance(id: int, db=Depends(get_db)):
+async def get_balance(id: int, db=Depends(get_db), current_user=Depends(get_current_user)):
+    await authorize_account_access(id, db, current_user)
     result = await db.execute(select(PostingModel).where(PostingModel.account_id == id))
     postings = result.scalars().all()
     return {"account_id": id, "balance": compute_balance(postings)}
@@ -365,7 +464,8 @@ async def get_balance(id: int, db=Depends(get_db)):
 
 # List an account's most recent postings (its "activity"), newest first.
 @app.get('/accounts/{id}/postings')
-async def get_account_postings(id: int, db=Depends(get_db)):
+async def get_account_postings(id: int, db=Depends(get_db), current_user=Depends(get_current_user)):
+    await authorize_account_access(id, db, current_user)
     result = await db.execute(
         select(PostingModel).where(PostingModel.account_id == id).order_by(PostingModel.id.desc()).limit(50)
     )
@@ -375,7 +475,8 @@ async def get_account_postings(id: int, db=Depends(get_db)):
 # A quick summary for the dashboard: balance, how many transactions touched
 # this account, and when the most recent one happened.
 @app.get('/accounts/{id}/summary')
-async def get_account_summary(id: int, db=Depends(get_db)):
+async def get_account_summary(id: int, db=Depends(get_db), current_user=Depends(get_current_user)):
+    await authorize_account_access(id, db, current_user)
     result = await db.execute(select(PostingModel).where(PostingModel.account_id == id))
     postings = result.scalars().all()
 
@@ -392,7 +493,8 @@ async def get_account_summary(id: int, db=Depends(get_db)):
 # Download an account's full history as a CSV statement, oldest first, with a
 # running balance column so each row shows the balance right after that posting.
 @app.get('/accounts/{id}/statement')
-async def export_account_statement(id: int, db=Depends(get_db)):
+async def export_account_statement(id: int, db=Depends(get_db), current_user=Depends(get_current_user)):
+    await authorize_account_access(id, db, current_user)
     result = await db.execute(
         select(PostingModel).where(PostingModel.account_id == id).order_by(PostingModel.id.asc())
     )

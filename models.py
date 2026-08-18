@@ -18,11 +18,16 @@ class UserModel(Base):
 
 
 # A ledger account that money can move in and out of.
+# Every user gets exactly one of these when they register, and its id is the
+# account number they share with other people to receive transfers.
 class AccountModel(Base):
     __tablename__ = 'accounts'
     id:Mapped[int] =mapped_column(primary_key=True, index=True)
-    owner_id:Mapped[int] = mapped_column(nullable=False) # which user this account belongs to
-    currency: Mapped[str] = mapped_column(nullable=False)
+    # unique: one account per user, enforced by the database rather than by
+    # remembering to check it at every call site.
+    owner_id:Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False, unique=True, index=True)
+    currency: Mapped[str] = mapped_column(nullable=False, default='USD')
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 # One transfer request. It may create two postings (a debit and a credit).
 class TransactionModel(Base):

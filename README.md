@@ -32,10 +32,10 @@ Client → FastAPI app → Postgres (accounts, transactions, postings)
 A single-page frontend is served at `/` (plain HTML/CSS/JS, no build step, styled with Tailwind via CDN):
 
 - **Login / registration**
-- **Dashboard** real balance, transaction count, and recent activity for one account
+- **Dashboard** real balance, transaction count, and recent activity for your account
 - **Accounts** full transaction history with a running balance, plus a CSV statement export
-- **Transfers** a confirm-before-send transfer flow
-- **Activity** postings for any account, newest first
+- **Transfers** a confirm-before-send flow; the source is always your own account, and you enter the recipient's account number
+- **Activity** your postings, newest first
 - **Admin Console** live invariant check, audit-chain verification, and a concurrency simulator that fires real concurrent transfers at the API to demonstrate the retry-on-conflict logic
 
 Everything shown is real data from the API nothing on any page is mocked.
@@ -128,19 +128,48 @@ FastAPI · async SQLAlchemy 2.0 · PostgreSQL · Kafka (aiokafka) · Docker · p
 
 | Route | Purpose |
 |---|---|
-| `POST /register` | Create a user |
+| `POST /register` | Create a user and their ledger account |
 | `POST /login` | Returns `{access_token, refresh_token}` |
 | `POST /refresh` | Exchange a refresh token for a new access token |
-| `POST /transfers` | Create a transfer (idempotent, SERIALIZABLE-safe) |
-| `GET /accounts/{id}/balance` | Derived balance for an account |
-| `GET /accounts/{id}/summary` | Balance + transaction count + last transaction time |
-| `GET /accounts/{id}/postings` | Recent postings for an account, newest first |
-| `GET /accounts/{id}/statement` | Full history as a downloadable CSV, with running balance |
+| `GET /accounts/me` | 🔒 Your account number, currency, and balance |
+| `POST /transfers` | 🔒 Create a transfer (idempotent, SERIALIZABLE-safe) |
+| `GET /accounts/{id}/balance` | 🔒 Derived balance for an account |
+| `GET /accounts/{id}/summary` | 🔒 Balance + transaction count + last transaction time |
+| `GET /accounts/{id}/postings` | 🔒 Recent postings for an account, newest first |
+| `GET /accounts/{id}/statement` | 🔒 Full history as a downloadable CSV, with running balance |
 | `GET /system/invariant-check` | System-wide debit/credit balance check |
 | `GET /system/audit-verify` | Verifies the hash-chained audit log is intact |
 
+🔒 = requires `Authorization: Bearer <access_token>`, and only ever acts on
+the caller's own account.
+
+## Accounts and ownership
+
+Registering creates a user **and** their one ledger account, in a single
+transaction. The account number is the next free id, and it is what you give
+someone who wants to pay you.
+
+From then on the API is scoped to whoever is holding the token:
+
+- `POST /transfers` requires a token, and `from_account` must be your own
+  account — sending from someone else's is a `403`. The destination can be any
+  real account, which is how one user pays another. Transfers to an account
+  that doesn't exist, to yourself, or for a non-positive amount are rejected.
+- `GET /accounts/{id}/*` only answers for the account you own. Another user's
+  account returns `404` rather than `403`, so the response can't be used to
+  test whether an account number exists.
+- `GET /accounts/me` tells the frontend which account is yours, so no account
+  number is hardcoded anywhere in the UI.
+- `GET /system/*` stays open: both endpoints report ledger-wide totals and
+  neither exposes an individual account's activity.
+
 ## Known limitations
 
-- No route currently enforces authentication `/transfers`, `/accounts/*`, etc. are all open. `get_current_user` exists in `auth.py`/`main.py` but isn't wired into those routes yet.
-- Accounts aren't linked to the users who "own" them. The web UI shows one configurable account (default `#1`, changeable via the Settings dropdown), not a per-user account list, since there's no ownership model in the data yet.
-- Transfers don't check that the source account has a sufficient balance before debiting.
+- Transfers don't check that the source account has a sufficient balance
+  before debiting, so an account can go negative. Every new account starts at
+  zero and there is no deposit route, so moving any money at all currently
+  means going negative first.
+- One account per user, fixed at registration. There's no way to open a
+  second account, close one, or transfer ownership.
+- `GET /system/*` is unauthenticated. Fine for a demo admin console, but it
+  does mean anyone can read ledger-wide totals.

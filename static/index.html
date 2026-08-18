@@ -220,12 +220,13 @@
             <span class="material-symbols-outlined">settings</span>
           </button>
           <div id="settings-dropdown" class="hidden-panel absolute right-0 top-12 w-64 sm:w-72 max-w-[calc(100vw-2rem)] bg-surface-container-lowest border border-outline-variant rounded-lg shadow-lg z-50 p-stack-md">
-            <label class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider block mb-unit" for="settings-account-id">Main account ID</label>
-            <p class="font-body-sm text-body-sm text-on-surface-variant mb-stack-sm">Which account the Dashboard and Accounts pages show.</p>
-            <div class="flex gap-stack-sm">
-              <input id="settings-account-id" type="number" min="1" value="1" class="flex-1 min-w-0 rounded px-3 py-2 font-label-mono text-label-mono bg-surface-container-low border border-outline-variant text-on-surface focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all">
-              <button onclick="saveMainAccountId()" class="bg-primary text-on-primary px-gutter rounded font-body-sm text-body-sm font-semibold hover:bg-on-primary-fixed-variant transition-colors">Save</button>
+            <label class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider block mb-unit">Your account</label>
+            <p class="font-body-sm text-body-sm text-on-surface-variant mb-stack-sm">Share this number with someone who wants to send you money.</p>
+            <div class="flex gap-stack-sm items-center">
+              <span id="settings-account-number" class="flex-1 min-w-0 rounded px-3 py-2 font-label-mono text-label-mono bg-surface-container-low border border-outline-variant text-on-surface">#—</span>
+              <button id="copy-account-btn" onclick="copyAccountNumber()" class="bg-primary text-on-primary px-gutter rounded font-body-sm text-body-sm font-semibold hover:bg-on-primary-fixed-variant transition-colors">Copy</button>
             </div>
+            <p id="settings-account-email" class="font-label-mono text-label-mono text-on-surface-variant text-[11px] mt-stack-sm break-all"></p>
           </div>
         </div>
       </div>
@@ -314,7 +315,7 @@
             <span class="material-symbols-outlined mr-unit text-[18px]">swap_horiz</span>
             Initiate Transfer
           </button>
-          <a id="acct-export-link" href="#" class="bg-surface-container-lowest text-primary border border-surface-variant px-gutter py-stack-sm rounded-DEFAULT font-body-sm text-body-sm font-semibold hover:bg-surface-container-low transition-colors flex items-center">
+          <a id="acct-export-link" href="#" onclick="downloadStatement(event)" class="bg-surface-container-lowest text-primary border border-surface-variant px-gutter py-stack-sm rounded-DEFAULT font-body-sm text-body-sm font-semibold hover:bg-surface-container-low transition-colors flex items-center">
             <span class="material-symbols-outlined mr-unit text-[18px]">download</span>
             Export Statement
           </a>
@@ -350,8 +351,8 @@
           <form id="transfer-form" onsubmit="event.preventDefault(); reviewTransfer();" class="flex flex-col gap-stack-md">
             <div class="grid grid-cols-2 gap-stack-md">
               <div class="flex flex-col gap-unit">
-                <label class="font-body-sm text-body-sm font-semibold text-primary" for="xfer-from">From account ID</label>
-                <input id="xfer-from" type="number" value="1" required class="w-full bg-surface-container-low border border-outline-variant rounded p-3 font-label-mono text-label-mono text-on-surface focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all">
+                <label class="font-body-sm text-body-sm font-semibold text-primary">From account</label>
+                <div id="xfer-from-display" class="w-full bg-surface-container-high border border-outline-variant rounded p-3 font-label-mono text-label-mono text-on-surface-variant">#— (your account)</div>
               </div>
               <div class="flex flex-col gap-unit">
                 <label class="font-body-sm text-body-sm font-semibold text-primary" for="xfer-to">To account ID</label>
@@ -456,7 +457,7 @@
               <div class="flex gap-2 items-end flex-wrap">
                 <div>
                   <label class="text-[10px] uppercase tracking-wider text-slate-500 block mb-1">From</label>
-                  <input id="sim-from" type="number" value="1" class="w-20 rounded px-2 py-1.5 font-label-mono text-label-mono bg-[#1f2937] border-slate-700 text-slate-200">
+                  <span id="sim-from" class="w-20 inline-block rounded px-2 py-1.5 font-label-mono text-label-mono bg-[#1f2937] border border-slate-700 text-slate-400">yours</span>
                 </div>
                 <div>
                   <label class="text-[10px] uppercase tracking-wider text-slate-500 block mb-1">To</label>
@@ -557,6 +558,12 @@ async function restoreSession() {
 
 async function callApi(path, options = {}) {
   const start = performance.now();
+  // Every protected route needs the bearer token. Attaching it here rather
+  // than at each call site means a new endpoint can't accidentally be added
+  // without auth.
+  if (accessToken) {
+    options.headers = { ...(options.headers || {}), 'Authorization': `Bearer ${accessToken}` };
+  }
   const response = await fetch(path, options);
   const ms = Math.round(performance.now() - start);
   const data = await response.json().catch(() => ({}));
@@ -575,8 +582,14 @@ function showAuthTab(which) {
     (isLogin ? 'text-primary border-b-2 border-primary' : 'text-on-surface-variant border-b-2 border-transparent hover:text-primary transition-colors');
   document.getElementById('tab-register').className = 'flex-1 pb-3 font-label-caps text-label-caps text-center ' +
     (!isLogin ? 'text-primary border-b-2 border-primary' : 'text-on-surface-variant border-b-2 border-transparent hover:text-primary transition-colors');
-  document.getElementById('form-login').style.display = isLogin ? 'flex' : 'none';
-  document.getElementById('form-register').style.display = isLogin ? 'none' : 'flex';
+  // Toggle the .hidden-panel class rather than setting style.display: that
+  // rule is `display: none !important`, so an inline display would lose to it
+  // and the register form could never be shown. (Same cascade trap the
+  // sidebar animation hits -- see the note by .hidden-panel in <style>.)
+  document.getElementById('form-login').classList.toggle('hidden-panel', !isLogin);
+  document.getElementById('form-login').classList.toggle('flex', isLogin);
+  document.getElementById('form-register').classList.toggle('hidden-panel', isLogin);
+  document.getElementById('form-register').classList.toggle('flex', !isLogin);
 }
 
 async function doLogin() {
@@ -620,7 +633,15 @@ async function doRegister() {
   }
 }
 
-function enterApp() {
+async function enterApp() {
+  // Without an account id nothing on the dashboard can load, so a failure
+  // here drops back to the login screen rather than showing empty panels.
+  const ok = await loadMyAccount();
+  if (!ok) {
+    clearSession();
+    accessToken = null;
+    return;
+  }
   document.getElementById('view-auth').classList.add('hidden-panel');
   document.getElementById('view-app').classList.remove('hidden-panel');
   document.getElementById('whoami-email').textContent = userEmail;
@@ -654,8 +675,22 @@ function toggleNotifications() {
 function toggleSettings() {
   const dropdown = document.getElementById('settings-dropdown');
   document.getElementById('notif-dropdown').classList.add('hidden-panel');
-  document.getElementById('settings-account-id').value = MAIN_ACCOUNT_ID;
+  document.getElementById('settings-account-number').textContent = `#${MAIN_ACCOUNT_ID}`;
+  document.getElementById('settings-account-email').textContent = userEmail || '';
   dropdown.classList.toggle('hidden-panel');
+}
+
+// Copy the account number so it can be given to someone who wants to pay you.
+async function copyAccountNumber() {
+  try {
+    await navigator.clipboard.writeText(String(MAIN_ACCOUNT_ID));
+    const btn = document.getElementById('copy-account-btn');
+    const original = btn.textContent;
+    btn.textContent = 'Copied';
+    setTimeout(() => { btn.textContent = original; }, 1200);
+  } catch (err) {
+    // Clipboard needs a secure context; the number is on screen regardless.
+  }
 }
 
 // Clicking outside either dropdown closes it.
@@ -695,16 +730,8 @@ async function loadNotifications() {
   }
 }
 
-// Changes which account the Dashboard and Accounts pages show, then refreshes
-// whichever of those is currently on screen.
-function saveMainAccountId() {
-  const value = Number(document.getElementById('settings-account-id').value);
-  if (!value || value < 1) return;
-  MAIN_ACCOUNT_ID = value;
-  document.getElementById('settings-dropdown').classList.add('hidden-panel');
-  if (getComputedStyle(document.getElementById('panel-dashboard')).display !== 'none') loadMainAccountDashboard();
-  if (getComputedStyle(document.getElementById('panel-accounts')).display !== 'none') loadAccountDetail();
-}
+// (The account switcher that used to live here is gone: an account number
+// other than your own is no longer viewable, so switching had nothing to do.)
 
 // ---- Navigation ----
 
@@ -717,6 +744,10 @@ function showPanel(name) {
   });
   if (name === 'dashboard') loadMainAccountDashboard();
   if (name === 'accounts') loadAccountDetail();
+  if (name === 'transfer') {
+    document.getElementById('xfer-from-display').textContent = `#${MAIN_ACCOUNT_ID} (your account)`;
+  }
+  if (name === 'admin') document.getElementById('sim-from').textContent = `#${MAIN_ACCOUNT_ID}`;
   closeSidebar(); // no-op on desktop, where the sidebar is always visible
 }
 
@@ -738,9 +769,21 @@ function toggleSidebar() {
 }
 
 // ---- Dashboard ----
-// This design has no account picker, so it always shows one fixed account.
-// Everything on it is real: balance, transaction count, and recent postings.
-let MAIN_ACCOUNT_ID = 1;
+// The signed-in user's own account number, filled in by loadMyAccount() right
+// after login. There is no account picker: you only ever see your own account,
+// because that is the only one the API will return to you.
+let MAIN_ACCOUNT_ID = null;
+
+// Ask the API which account belongs to this user. Everything else on the page
+// depends on this, so enterApp() awaits it before showing any panel.
+async function loadMyAccount() {
+  const result = await callApi('/accounts/me');
+  if (result.ok) {
+    MAIN_ACCOUNT_ID = result.data.account_id;
+    return true;
+  }
+  return false;
+}
 
 async function loadMainAccountDashboard() {
   const [summaryResult, postingsResult] = await Promise.all([
@@ -795,7 +838,6 @@ async function loadMainAccountDashboard() {
 // and tracking the total, then showing newest-first like the design does.
 async function loadAccountDetail() {
   document.getElementById('acct-account-id').textContent = `ACCT: #${MAIN_ACCOUNT_ID}`;
-  document.getElementById('acct-export-link').href = `/accounts/${MAIN_ACCOUNT_ID}/statement`;
 
   const [summaryResult, postingsResult] = await Promise.all([
     callApi(`/accounts/${MAIN_ACCOUNT_ID}/summary`),
@@ -871,13 +913,36 @@ function renderPostingsRows(tbodyId, emptyId, postings, limit) {
   }
 }
 
+// The CSV statement route requires a bearer token, and a plain <a href="...">
+// navigation cannot carry one -- it would just 401. So fetch it with the
+// header attached and hand the browser the result as a blob.
+async function downloadStatement(event) {
+  event.preventDefault();
+  const response = await fetch(`/accounts/${MAIN_ACCOUNT_ID}/statement`, {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  if (!response.ok) return;
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `account-${MAIN_ACCOUNT_ID}-statement.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 // ---- Transfer ----
 
 let pendingTransfer = null;
 
 function reviewTransfer() {
   pendingTransfer = {
-    from_account: Number(document.getElementById('xfer-from').value),
+    // Always your own account -- the server rejects anything else with a 403,
+    // so letting this be typed in would only produce confusing failures.
+    from_account: MAIN_ACCOUNT_ID,
     to_account: Number(document.getElementById('xfer-to').value),
     amount: Number(document.getElementById('xfer-amount').value),
     idempotency_key: newIdempotencyKey()
@@ -998,7 +1063,7 @@ async function runConcurrencySim() {
   const terminal = document.getElementById('sim-terminal');
   if (btn.disabled) return;
 
-  const from_account = Number(document.getElementById('sim-from').value);
+  const from_account = MAIN_ACCOUNT_ID;
   const to_account = Number(document.getElementById('sim-to').value);
   const amount = Number(document.getElementById('sim-amount').value);
   const count = Math.min(Number(document.getElementById('sim-count').value) || 1, 200);

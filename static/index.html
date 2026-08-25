@@ -128,11 +128,11 @@
     <form id="form-login" onsubmit="event.preventDefault(); doLogin();" class="flex flex-col gap-stack-md">
       <div class="flex flex-col gap-unit">
         <label class="font-body-sm text-body-sm font-semibold text-primary" for="login-email">Email</label>
-        <input id="login-email" type="email" value="alice@example.com" required class="w-full rounded px-4 py-3 font-body-md text-body-md text-primary bg-surface-container-low border border-outline-variant focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all">
+        <input id="login-email" type="email" placeholder="you@example.com" required class="w-full rounded px-4 py-3 font-body-md text-body-md text-primary bg-surface-container-low border border-outline-variant focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all">
       </div>
       <div class="flex flex-col gap-unit">
         <label class="font-body-sm text-body-sm font-semibold text-primary" for="login-password">Password</label>
-        <input id="login-password" type="password" value="password123" required class="w-full rounded px-4 py-3 font-body-md text-body-md text-primary bg-surface-container-low border border-outline-variant focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all">
+        <input id="login-password" type="password" placeholder="••••••••" required class="w-full rounded px-4 py-3 font-body-md text-body-md text-primary bg-surface-container-low border border-outline-variant focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all">
       </div>
       <button type="submit" class="bg-primary text-on-primary w-full rounded py-3 font-body-md text-body-md font-semibold mt-2 flex justify-center items-center gap-2 hover:bg-on-primary-fixed-variant transition-colors">
         Log in <span class="material-symbols-outlined text-lg">arrow_forward</span>
@@ -154,6 +154,21 @@
       </button>
       <div id="register-error" class="hidden-panel font-body-sm text-body-sm text-error bg-error-container rounded px-3 py-2"></div>
     </form>
+
+    <!-- Sits outside both forms so it works on either tab. Creates a brand new
+         account each time and signs straight in, so the demo can be tried
+         without inventing credentials. -->
+    <div class="flex items-center gap-stack-sm w-full mt-2">
+      <div class="flex-1 h-px bg-outline-variant"></div>
+      <span class="font-label-caps text-label-caps text-on-surface-variant">OR</span>
+      <div class="flex-1 h-px bg-outline-variant"></div>
+    </div>
+
+    <button id="test-account-btn" onclick="useTestAccount()" class="w-full rounded py-3 font-body-md text-body-md font-semibold border border-outline-variant text-primary bg-surface-container-lowest hover:bg-surface-container-low transition-colors flex justify-center items-center gap-2">
+      <span class="material-symbols-outlined text-lg">bolt</span> Use a test account
+    </button>
+    <p class="font-body-sm text-body-sm text-on-surface-variant text-center">Creates a fresh account and signs you in. Starts at a zero balance.</p>
+    <div id="test-account-error" class="hidden-panel font-body-sm text-body-sm text-error bg-error-container rounded px-3 py-2 w-full"></div>
   </div>
 </div>
 
@@ -630,6 +645,55 @@ async function doRegister() {
   } else {
     errBox.textContent = (result.data && result.data.detail) || 'Registration failed. Email may already be taken.';
     errBox.classList.remove('hidden-panel');
+  }
+}
+
+// Creates a brand new account and signs straight into it, so the demo can be
+// tried without inventing credentials. A fresh account per click rather than
+// one shared fixed login: a shared demo account would let any visitor see and
+// spend from whatever the previous visitor did, since every route here is
+// scoped to the account that owns it.
+async function useTestAccount() {
+  const btn = document.getElementById('test-account-btn');
+  const errBox = document.getElementById('test-account-error');
+  const original = btn.innerHTML;
+  errBox.classList.add('hidden-panel');
+  btn.disabled = true;
+  btn.innerHTML = 'Setting up your account...';
+
+  // Random so repeated clicks never collide with an account that already
+  // exists -- /register answers 409 on a duplicate email.
+  const suffix = crypto.randomUUID().slice(0, 8);
+  const email = `demo-${suffix}@ledgercore.test`;
+  const password = crypto.randomUUID();
+
+  try {
+    const registered = await callApi('/register', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    if (!registered.ok) {
+      throw new Error((registered.data && registered.data.detail) || 'Could not create a test account.');
+    }
+
+    const loggedIn = await callApi('/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    if (!loggedIn.ok || !loggedIn.data.access_token) {
+      throw new Error('The account was created but signing in failed.');
+    }
+
+    accessToken = loggedIn.data.access_token;
+    userEmail = email;
+    saveSession(loggedIn.data.refresh_token, email);
+    await enterApp();
+  } catch (err) {
+    errBox.textContent = err.message || 'Something went wrong. Please try again.';
+    errBox.classList.remove('hidden-panel');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = original;
   }
 }
 

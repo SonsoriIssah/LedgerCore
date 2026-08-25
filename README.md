@@ -31,7 +31,7 @@ Client → FastAPI app → Postgres (accounts, transactions, postings)
 
 A single-page frontend is served at `/` (plain HTML/CSS/JS, no build step, styled with Tailwind via CDN):
 
-- **Login / registration**
+- **Login / registration**, plus a one-click *Use a test account* button that creates a fresh account and signs straight in
 - **Dashboard** real balance, transaction count, and recent activity for your account
 - **Accounts** full transaction history with a running balance, plus a CSV statement export
 - **Transfers** a confirm-before-send flow; the source is always your own account, and you enter the recipient's account number

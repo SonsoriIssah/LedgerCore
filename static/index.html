@@ -476,7 +476,7 @@
                 </div>
                 <div>
                   <label class="text-[10px] uppercase tracking-wider text-slate-500 block mb-1">To</label>
-                  <input id="sim-to" type="number" value="2" class="w-20 rounded px-2 py-1.5 font-label-mono text-label-mono bg-[#1f2937] border-slate-700 text-slate-200">
+                  <input id="sim-to" type="number" placeholder="acct #" class="w-20 rounded px-2 py-1.5 font-label-mono text-label-mono bg-[#1f2937] border-slate-700 text-slate-200 placeholder:text-slate-600">
                 </div>
                 <div>
                   <label class="text-[10px] uppercase tracking-wider text-slate-500 block mb-1">Amount</label>
@@ -1132,6 +1132,18 @@ async function runConcurrencySim() {
   const amount = Number(document.getElementById('sim-amount').value);
   const count = Math.min(Number(document.getElementById('sim-count').value) || 1, 200);
 
+  // Check the destination once, up front. Firing 20 requests that will all
+  // fail the same way just prints the same error 20 times and tells you
+  // nothing about which of the three possible causes it was.
+  if (!to_account) {
+    terminal.innerHTML = '<div class="text-red-500">&gt; Enter the account number to send to. It has to be a real account other than your own &mdash; register a second account in another browser tab to get one.</div>';
+    return;
+  }
+  if (to_account === from_account) {
+    terminal.innerHTML = `<div class="text-red-500">&gt; #${to_account} is your own account. A transfer needs a different destination.</div>`;
+    return;
+  }
+
   btn.disabled = true;
   btn.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">refresh</span> Running...';
   terminal.innerHTML = `<div class="text-slate-500">&gt; Firing ${count} concurrent transfers (account #${from_account} -&gt; #${to_account}, $${amount} each)...</div>`;
@@ -1142,7 +1154,11 @@ async function runConcurrencySim() {
       body: JSON.stringify({ from_account, to_account, amount, idempotency_key: newIdempotencyKey() })
     }).then(result => {
       const line = document.createElement('div');
-      const label = result.ok ? 'succeeded' : (result.status === 409 ? 'rejected (conflict)' : `failed (${result.status})`);
+      // Include the server's explanation. "failed (404)" on its own gives no
+      // clue that the destination account simply does not exist.
+      const detail = (result.data && result.data.detail) ? ` — ${result.data.detail}` : '';
+      const label = result.ok ? 'succeeded'
+        : (result.status === 409 ? 'rejected (conflict)' : `failed (${result.status})${detail}`);
       const color = result.ok ? 'text-green-500' : (result.status === 409 ? 'text-yellow-500' : 'text-red-500');
       line.className = 'flex gap-3';
       line.innerHTML = `<span class="text-slate-600">#${i + 1}</span><span class="${color} flex-1">${label}</span><span class="text-slate-600 w-14 text-right">${result.ms}ms</span>`;

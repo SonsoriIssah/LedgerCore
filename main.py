@@ -4,7 +4,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
-from database import engine, get_db, Base, AsyncSessionLocal, KAFKA_BOOTSTRAP_SERVERS
+from database import engine, get_db, Base, AsyncSessionLocal, KAFKA_BOOTSTRAP_SERVERS, DATABASE_URL
 from pydantic import BaseModel
 from sqlalchemy import select, text
 from models import UserModel, AccountModel, TransactionModel, PostingModel, OutboxModel, ProcessedEventModel, AuditLogModel
@@ -12,11 +12,34 @@ from auth import hash_password, verify_password, create_access_token, decode_acc
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
 import json, asyncio, http, uuid, logging, csv, io, random
-from sqlalchemy.exc import OperationalError, DBAPIError, IntegrityError
+from urllib.parse import urlparse
+from sqlalchemy.exc import OperationalError, DBAPIError, IntegrityError, InterfaceError
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 import hashlib
 
 logger = logging.getLogger(__name__)
+
+
+# Describe where we are trying to connect, for error messages only.
+# Credentials are deliberately dropped: DATABASE_URL contains the database
+# password, and a startup error usually ends up in a log aggregator or a
+# support ticket.
+def describe_database_target() -> str:
+    try:
+        parsed = urlparse(DATABASE_URL)
+        host = parsed.hostname or "?"
+        port = f":{parsed.port}" if parsed.port else ""
+        name = (parsed.path or "").lstrip("/") or "?"
+        return f"{host}{port}/{name}"
+    except Exception:
+        return "the configured database"
+
+
+# Connectivity failures look different depending on how far the connection
+# attempt got: an unresolvable hostname surfaces as a raw OSError
+# (socket.gaierror) straight from the event loop, while a refused or dropped
+# connection is wrapped by SQLAlchemy.
+DATABASE_UNREACHABLE_ERRORS = (OSError, OperationalError, InterfaceError)
 
 # Holds the Kafka producer once it connects. Stays None if Kafka is not available.
 producer = None
@@ -76,11 +99,10 @@ async def outbox_consumer():
                 print(f"Processing event: {event_data}")
     finally:
         await consumer.stop()
-# This runs once when the app starts, and once when it shuts down.
-# It creates the database tables, connects to Kafka, and starts the background tasks.
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global producer
+# Create any missing tables, then patch in schema changes made after a table
+# was already deployed. Pulled out of lifespan() so the connection failure and
+# the schema failure can be reported as the different problems they are.
+async def prepare_database() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         # create_all() only creates missing tables -- it never adds columns to
@@ -110,6 +132,37 @@ async def lifespan(app: FastAPI):
                 END IF;
             END $$;
         """))
+
+
+# This runs once when the app starts, and once when it shuts down.
+# It creates the database tables, connects to Kafka, and starts the background tasks.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global producer
+    try:
+        await prepare_database()
+    except DATABASE_UNREACHABLE_ERRORS as exc:
+        # Deliberately fatal: a ledger that cannot reach its database must not
+        # start. Serving requests without it would be worse than failing.
+        # The re-raise below preserves that; this only replaces a hundred-line
+        # traceback with one line naming the actual problem, because the
+        # underlying error ("Name or service not known") never mentions the
+        # database or the setting that points at it.
+        logger.critical(
+            "STARTUP FAILED: cannot reach the database at %s (%s: %s). "
+            "Check that DATABASE_URL is set correctly, that the database still "
+            "exists, and that it is reachable from here.",
+            describe_database_target(), type(exc).__name__, exc,
+        )
+        raise
+    except Exception as exc:
+        # Reached the database, but the schema setup itself failed.
+        logger.critical(
+            "STARTUP FAILED: connected to %s but could not prepare the schema (%s: %s).",
+            describe_database_target(), type(exc).__name__, exc,
+        )
+        raise
+
     try:
         # Try to connect to Kafka. If it fails, keep the app running without it,
         # so the API still works even if Kafka is down or not set up yet.

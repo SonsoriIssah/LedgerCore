@@ -62,6 +62,37 @@ docker compose down -v
 docker compose up --build -d
 ```
 
+## Deployment troubleshooting
+
+### "STARTUP FAILED: cannot reach the database at ..."
+The app could not open a connection, so it refused to start. This is
+deliberate -- a ledger that cannot reach its database should fail loudly
+rather than serve requests it cannot record. Check, in order:
+
+1. `DATABASE_URL` is set on the service, and starts with
+   `postgresql+asyncpg://`. Managed providers hand out `postgres://...`;
+   that prefix has to be changed or SQLAlchemy cannot load the driver.
+2. The database still exists. Free-tier databases are often deleted after a
+   period of inactivity, which leaves the hostname unresolvable -- the
+   underlying error is `Name or service not known`.
+3. The host is reachable from the service. An "internal" connection string
+   usually only resolves from inside the same provider region; from
+   anywhere else the hostname means nothing.
+
+`Name or service not known` means DNS: the hostname is wrong or gone.
+`Connection refused` means the host exists but nothing is listening there.
+
+### "STARTUP FAILED: connected to ... but could not prepare the schema"
+The connection worked, so `DATABASE_URL` is fine. Something in
+`prepare_database()` failed -- usually a migration that cannot apply to the
+data already present, such as adding a UNIQUE constraint to a column that
+already holds duplicates.
+
+### "No open ports detected"
+A host that scans for a bound port reports this when the app exits during
+startup. It is a symptom, not the cause -- the real error is above it in the
+log.
+
 ## Architecture
 
 ### The core guarantee

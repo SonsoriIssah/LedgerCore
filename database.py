@@ -33,10 +33,20 @@ SQL_ECHO = os.getenv("SQL_ECHO", "").lower() in ("1", "true", "yes")
 # when talking to a pooler. Set DB_DISABLE_PREPARED_STATEMENTS explicitly to
 # override the detection either way.
 def _looks_like_a_pooler(url: str) -> bool:
-    parsed = urlparse(url)
-    host = (parsed.hostname or "").lower()
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        port = parsed.port
+    except ValueError:
+        # A malformed URL must not crash the import. urlparse raises on, for
+        # example, square brackets left in from a connection-string template,
+        # and an exception here would kill the app before anything can explain
+        # why. Fall back to a plain substring check; lifespan() reports the
+        # real problem with a message that actually names DATABASE_URL.
+        lowered = url.lower()
+        return "pooler." in lowered or "pgbouncer" in lowered or ":6543/" in lowered
     # 6543 is the conventional transaction-mode pooler port.
-    return "pooler." in host or "pgbouncer" in host or parsed.port == 6543
+    return "pooler." in host or "pgbouncer" in host or port == 6543
 
 
 _override = os.getenv("DB_DISABLE_PREPARED_STATEMENTS")

@@ -139,6 +139,23 @@ async def prepare_database() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global producer
+
+    # Check the URL is even parseable before trying to use it. urlparse raises
+    # on square brackets, which is exactly what is left behind when the
+    # [YOUR-PASSWORD] placeholder in a provider's connection-string template
+    # is filled in without deleting the brackets around it.
+    try:
+        urlparse(DATABASE_URL)
+    except ValueError as exc:
+        logger.critical(
+            "STARTUP FAILED: DATABASE_URL is not a valid connection string (%s). "
+            "The usual cause is leftover square brackets from a template -- the URL "
+            "should contain no '[' or ']' at all. Expected form: "
+            "postgresql+asyncpg://USER:PASSWORD@HOST:PORT/DBNAME",
+            exc,
+        )
+        raise
+
     if DISABLE_PREPARED_STATEMENTS:
         # Logged here rather than at import, because uvicorn configures logging
         # after importing the app -- an import-time message is simply lost.

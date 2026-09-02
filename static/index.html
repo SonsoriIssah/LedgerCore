@@ -120,6 +120,21 @@
       <p class="font-body-sm text-body-sm text-on-surface-variant">A double-entry ledger, built from scratch.</p>
     </div>
 
+    <!-- Primary path. Most people opening this have no account and no reason
+         to invent credentials just to look around, so the one-click route is
+         the main action and email sign-in sits underneath it. -->
+    <button id="test-account-btn" onclick="useTestAccount()" class="bg-primary text-on-primary w-full rounded py-3 font-body-md text-body-md font-semibold flex justify-center items-center gap-2 hover:bg-on-primary-fixed-variant transition-colors">
+      <span class="material-symbols-outlined text-lg">bolt</span> Use a test account
+    </button>
+    <p class="font-body-sm text-body-sm text-on-surface-variant text-center mt-stack-sm">One click, no details needed. Creates a fresh account and signs you in, starting at a zero balance.</p>
+    <div id="test-account-error" class="hidden-panel font-body-sm text-body-sm text-error bg-error-container rounded px-3 py-2 w-full mt-stack-sm"></div>
+
+    <div class="flex items-center gap-stack-sm w-full mt-stack-lg mb-stack-sm">
+      <div class="flex-1 h-px bg-outline-variant"></div>
+      <span class="font-label-caps text-label-caps text-on-surface-variant">OR USE EMAIL</span>
+      <div class="flex-1 h-px bg-outline-variant"></div>
+    </div>
+
     <div class="flex border-b border-outline-variant w-full mb-2">
       <button id="tab-login" onclick="showAuthTab('login')" class="flex-1 pb-3 font-label-caps text-label-caps text-primary border-b-2 border-primary text-center">LOG IN</button>
       <button id="tab-register" onclick="showAuthTab('register')" class="flex-1 pb-3 font-label-caps text-label-caps text-on-surface-variant hover:text-primary transition-colors text-center border-b-2 border-transparent">CREATE ACCOUNT</button>
@@ -134,7 +149,7 @@
         <label class="font-body-sm text-body-sm font-semibold text-primary" for="login-password">Password</label>
         <input id="login-password" type="password" placeholder="••••••••" required class="w-full rounded px-4 py-3 font-body-md text-body-md text-primary bg-surface-container-low border border-outline-variant focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all">
       </div>
-      <button type="submit" class="bg-primary text-on-primary w-full rounded py-3 font-body-md text-body-md font-semibold mt-2 flex justify-center items-center gap-2 hover:bg-on-primary-fixed-variant transition-colors">
+      <button type="submit" class="w-full rounded py-3 font-body-md text-body-md font-semibold mt-2 flex justify-center items-center gap-2 border border-outline-variant text-primary bg-surface-container-lowest hover:bg-surface-container-low transition-colors">
         Log in <span class="material-symbols-outlined text-lg">arrow_forward</span>
       </button>
       <div id="login-error" class="hidden-panel font-body-sm text-body-sm text-error bg-error-container rounded px-3 py-2"></div>
@@ -149,26 +164,11 @@
         <label class="font-body-sm text-body-sm font-semibold text-primary" for="reg-password">Password</label>
         <input id="reg-password" type="password" placeholder="••••••••" required class="w-full rounded px-4 py-3 font-body-md text-body-md text-primary bg-surface-container-low border border-outline-variant focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20 transition-all">
       </div>
-      <button type="submit" class="bg-primary text-on-primary w-full rounded py-3 font-body-md text-body-md font-semibold mt-2 flex justify-center items-center gap-2 hover:bg-on-primary-fixed-variant transition-colors">
+      <button type="submit" class="w-full rounded py-3 font-body-md text-body-md font-semibold mt-2 flex justify-center items-center gap-2 border border-outline-variant text-primary bg-surface-container-lowest hover:bg-surface-container-low transition-colors">
         Create account <span class="material-symbols-outlined text-lg">arrow_forward</span>
       </button>
       <div id="register-error" class="hidden-panel font-body-sm text-body-sm text-error bg-error-container rounded px-3 py-2"></div>
     </form>
-
-    <!-- Sits outside both forms so it works on either tab. Creates a brand new
-         account each time and signs straight in, so the demo can be tried
-         without inventing credentials. -->
-    <div class="flex items-center gap-stack-sm w-full mt-2">
-      <div class="flex-1 h-px bg-outline-variant"></div>
-      <span class="font-label-caps text-label-caps text-on-surface-variant">OR</span>
-      <div class="flex-1 h-px bg-outline-variant"></div>
-    </div>
-
-    <button id="test-account-btn" onclick="useTestAccount()" class="w-full rounded py-3 font-body-md text-body-md font-semibold border border-outline-variant text-primary bg-surface-container-lowest hover:bg-surface-container-low transition-colors flex justify-center items-center gap-2">
-      <span class="material-symbols-outlined text-lg">bolt</span> Use a test account
-    </button>
-    <p class="font-body-sm text-body-sm text-on-surface-variant text-center">Creates a fresh account and signs you in. Starts at a zero balance.</p>
-    <div id="test-account-error" class="hidden-panel font-body-sm text-body-sm text-error bg-error-container rounded px-3 py-2 w-full"></div>
   </div>
 </div>
 

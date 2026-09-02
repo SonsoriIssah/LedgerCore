@@ -8,7 +8,27 @@ import os
 
 # Read the database address from the environment.
 # If it is not set, use a local Postgres database instead. This keeps local development working.
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost/fastapi_db")
+_RAW_DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost/fastapi_db")
+
+
+# Every managed Postgres provider hands out a URL starting "postgresql://" (or
+# the older "postgres://"). SQLAlchemy reads that scheme as "use psycopg2",
+# which isn't installed here -- the app is built on asyncpg -- so it fails at
+# import with ModuleNotFoundError: No module named 'psycopg2', which says
+# nothing about the URL being the problem.
+#
+# This app only ever talks to Postgres through asyncpg, so a bare Postgres
+# scheme is unambiguous: normalise it rather than making every deployment
+# remember to hand-edit the prefix.
+def normalise_database_url(url: str) -> str:
+    for prefix in ("postgresql://", "postgres://"):
+        if url.startswith(prefix):
+            return "postgresql+asyncpg://" + url[len(prefix):]
+    return url
+
+
+DATABASE_URL = normalise_database_url(_RAW_DATABASE_URL)
+DATABASE_URL_WAS_NORMALISED = DATABASE_URL != _RAW_DATABASE_URL
 
 # Read the Kafka address from the environment.
 # If it is not set, use localhost. This keeps local development working.

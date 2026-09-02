@@ -4,7 +4,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
-from database import engine, get_db, Base, AsyncSessionLocal, KAFKA_BOOTSTRAP_SERVERS, DATABASE_URL, DISABLE_PREPARED_STATEMENTS
+from database import engine, get_db, Base, AsyncSessionLocal, KAFKA_BOOTSTRAP_SERVERS, DATABASE_URL, DISABLE_PREPARED_STATEMENTS, DATABASE_URL_WAS_NORMALISED
 from pydantic import BaseModel
 from sqlalchemy import select, text
 from models import UserModel, AccountModel, TransactionModel, PostingModel, OutboxModel, ProcessedEventModel, AuditLogModel
@@ -155,6 +155,12 @@ async def lifespan(app: FastAPI):
             exc,
         )
         raise
+
+    if DATABASE_URL_WAS_NORMALISED:
+        logger.warning(
+            "DATABASE_URL used a plain Postgres scheme; connecting with asyncpg "
+            "instead. Set it to postgresql+asyncpg://... to silence this."
+        )
 
     if DISABLE_PREPARED_STATEMENTS:
         # Logged here rather than at import, because uvicorn configures logging

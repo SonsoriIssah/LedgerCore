@@ -103,8 +103,13 @@ prepared statements stay on and queries are measurably faster. Note that
 Supabase's direct endpoint is IPv6-only unless the IPv4 add-on is enabled,
 so an IPv4-only host has to use the pooler.
 
-Whichever string you use, change the `postgres://` prefix that providers
-hand out to `postgresql+asyncpg://`, or SQLAlchemy cannot load the driver.
+Providers hand out a URL starting `postgresql://` (or the older
+`postgres://`). SQLAlchemy reads that scheme as "use psycopg2", which is not
+installed here, and fails at import with `ModuleNotFoundError: No module
+named 'psycopg2'` -- a message that never mentions the URL. Since this app
+only ever talks to Postgres through asyncpg, `database.py` rewrites a bare
+Postgres scheme to `postgresql+asyncpg://` and logs a warning, so a provider
+string can be pasted in unedited.
 
 ### "STARTUP FAILED: connected to ... but could not prepare the schema"
 The connection worked, so `DATABASE_URL` is fine. Something in

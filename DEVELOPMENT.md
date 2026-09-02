@@ -82,6 +82,30 @@ rather than serve requests it cannot record. Check, in order:
 `Name or service not known` means DNS: the hostname is wrong or gone.
 `Connection refused` means the host exists but nothing is listening there.
 
+### Connecting through a managed provider (Supabase, Neon)
+
+Managed Postgres providers front the database with a connection pooler
+(PgBouncer). In transaction pooling mode a client does not keep the same
+server connection between statements, so server-side prepared statements
+break -- and asyncpg uses them by default. It does not fail at startup; it
+fails intermittently under concurrency with:
+
+    DuplicatePreparedStatementError: prepared statement
+    "__asyncpg_stmt_1__" already exists
+
+`database.py` detects a pooler from the host (`pooler.`, `pgbouncer`, or
+port 6543) and disables both statement caches when it sees one, logging a
+warning at startup so the mode is visible. `DB_DISABLE_PREPARED_STATEMENTS=1`
+or `=0` overrides the detection either way.
+
+Prefer a direct (non-pooled) connection string where the network allows it:
+prepared statements stay on and queries are measurably faster. Note that
+Supabase's direct endpoint is IPv6-only unless the IPv4 add-on is enabled,
+so an IPv4-only host has to use the pooler.
+
+Whichever string you use, change the `postgres://` prefix that providers
+hand out to `postgresql+asyncpg://`, or SQLAlchemy cannot load the driver.
+
 ### "STARTUP FAILED: connected to ... but could not prepare the schema"
 The connection worked, so `DATABASE_URL` is fine. Something in
 `prepare_database()` failed -- usually a migration that cannot apply to the

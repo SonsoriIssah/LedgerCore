@@ -4,7 +4,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
-from database import engine, get_db, Base, AsyncSessionLocal, KAFKA_BOOTSTRAP_SERVERS, DATABASE_URL
+from database import engine, get_db, Base, AsyncSessionLocal, KAFKA_BOOTSTRAP_SERVERS, DATABASE_URL, DISABLE_PREPARED_STATEMENTS
 from pydantic import BaseModel
 from sqlalchemy import select, text
 from models import UserModel, AccountModel, TransactionModel, PostingModel, OutboxModel, ProcessedEventModel, AuditLogModel
@@ -139,6 +139,16 @@ async def prepare_database() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global producer
+    if DISABLE_PREPARED_STATEMENTS:
+        # Logged here rather than at import, because uvicorn configures logging
+        # after importing the app -- an import-time message is simply lost.
+        # warning, not info: this changes how the app talks to the database, and
+        # uvicorn's default config does not surface info from this logger --
+        # same reasoning as the Kafka degraded-mode notice below.
+        logger.warning(
+            "Database host looks like a connection pooler, so prepared statements "
+            "are disabled. Override with DB_DISABLE_PREPARED_STATEMENTS=0."
+        )
     try:
         await prepare_database()
     except DATABASE_UNREACHABLE_ERRORS as exc:
